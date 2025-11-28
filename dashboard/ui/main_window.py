@@ -15,6 +15,7 @@ from dashboard.ui.panels.monitor_panel import MonitorPanel
 from dashboard.ui.panels.profile_browser import ProfileBrowser
 from dashboard.ui.panels.settings_panel import SettingsPanel
 from dashboard.controllers.pipeline_controller import PipelineController
+from dashboard.services.email_alert import EmailAlerter
 from typing import List, Dict, Optional
 
 
@@ -24,9 +25,10 @@ class MainWindow(QMainWindow):
     Coordinates all panels and controllers
     """
 
-    def __init__(self):
+    def __init__(self, cache_store=None):
         super().__init__()
 
+        self.cache_store = cache_store
         self.pipeline_controller: Optional[PipelineController] = None
 
         self.setWindowTitle("Stock Pipeline Control Dashboard")
@@ -35,6 +37,9 @@ class MainWindow(QMainWindow):
         self.init_ui()
         self.create_menu_bar()
         self.create_status_bar()
+
+        # Initialize email alerter (after settings panel exists)
+        self.email_alerter = EmailAlerter(self.settings_panel.get_email_settings())
 
     def init_ui(self):
         """Initialize UI components"""
@@ -45,8 +50,8 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
 
         # Tab 1: Pipeline Control & Monitoring
-        self.control_panel = ControlPanel()
-        self.monitor_panel = MonitorPanel()
+        self.control_panel = ControlPanel(cache_store=self.cache_store)
+        self.monitor_panel = MonitorPanel(cache_store=self.cache_store)
 
         main_tab = QWidget()
         main_layout = QVBoxLayout()
@@ -177,12 +182,16 @@ class MainWindow(QMainWindow):
             self.monitor_panel.update_api_stats
         )
 
+        self.pipeline_controller.signals.metrics_updated.connect(
+            self.monitor_panel.on_metrics_updated
+        )
+
         self.pipeline_controller.signals.eta_updated.connect(
             self.monitor_panel.update_eta
         )
 
         self.pipeline_controller.signals.log_message.connect(
-            self.monitor_panel.append_log
+            self._on_log_message
         )
 
         self.pipeline_controller.signals.pipeline_completed.connect(
@@ -193,6 +202,18 @@ class MainWindow(QMainWindow):
             self._on_pipeline_stopped
         )
 
+        self.pipeline_controller.signals.pipeline_cleared.connect(
+            lambda: self.status_bar.showMessage('Pipeline cleared')
+        )
+
+        # Connect queue table signals for per-symbol control
+        self.monitor_panel.queue_table.pause_symbol_requested.connect(self._on_pause_symbol)
+        self.monitor_panel.queue_table.resume_symbol_requested.connect(self._on_resume_symbol)
+        self.monitor_panel.queue_table.cancel_symbol_requested.connect(self._on_cancel_symbol)
+        self.monitor_panel.queue_table.skip_symbol_requested.connect(self._on_skip_symbol)
+        self.monitor_panel.queue_table.remove_requested.connect(self._on_remove_symbol)
+        self.monitor_panel.queue_table.view_profile_requested.connect(self._on_view_profile)
+
         # Start processing
         self.pipeline_controller.start()
 
@@ -200,23 +221,49 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def pause_pipeline(self):
-        """Pause pipeline processing"""
-        if self.pipeline_controller and self.pipeline_controller.isRunning():
+        """Pause or resume pipeline processing"""
+        if not (self.pipeline_controller and self.pipeline_controller.isRunning()):
+            return
+        if not self.pipeline_controller.is_paused:
             self.pipeline_controller.pause()
+            # Update button label to Resume
+            try:
+                self.control_panel.pause_btn.setText("▶ Resume")
+            except Exception:
+                pass
             self.status_bar.showMessage("Pipeline paused")
+        else:
+            self.pipeline_controller.resume()
+            try:
+                self.control_panel.pause_btn.setText("⏸ Pause")
+            except Exception:
+                pass
+            self.status_bar.showMessage("Pipeline resumed")
 
     @pyqtSlot()
     def stop_pipeline(self):
         """Stop pipeline processing"""
         if self.pipeline_controller and self.pipeline_controller.isRunning():
             self.pipeline_controller.stop()
+            try:
+                self.control_panel.pause_btn.setText("⏸ Pause")
+            except Exception:
+                pass
             self.status_bar.showMessage("Stopping pipeline...")
 
     @pyqtSlot()
     def clear_queue(self):
-        """Clear monitoring queue"""
+        """Clear monitoring queue and stop pipeline"""
+        if self.pipeline_controller and self.pipeline_controller.isRunning():
+            self.pipeline_controller.clear()
+            self.pipeline_controller.wait()
         self.monitor_panel.clear()
-        self.status_bar.showMessage("Queue cleared")
+        self.control_panel.reset()
+        try:
+            self.control_panel.pause_btn.setText("⏸ Pause")
+        except Exception:
+            pass
+        self.status_bar.showMessage("Queue cleared and pipeline stopped")
 
     @pyqtSlot(dict)
     def _on_pipeline_completed(self, summary: Dict):
@@ -255,6 +302,18 @@ class MainWindow(QMainWindow):
     def _on_settings_changed(self, settings: Dict):
         """Handle settings change"""
         self.status_bar.showMessage("Settings updated", 3000)
+        self.email_alerter.update_config(self.settings_panel.get_email_settings())
+
+    @pyqtSlot(str, str)
+    def _on_log_message(self, level: str, message: str):
+        """Forward log to monitor and trigger email alerts if configured."""
+        self.monitor_panel.append_log(level, message)
+        if level in ('ERROR','CRITICAL'):
+            self.email_alerter.send_alert(
+                subject=f"Pipeline {level} Alert",
+                message=message,
+                window=self
+            )
 
     def _refresh_profiles(self):
         """Refresh profile browser"""
@@ -320,3 +379,63 @@ class MainWindow(QMainWindow):
         else:
             event.accept()
 
+    # ==================== PER-SYMBOL CONTROL HANDLERS ====================
+
+    @pyqtSlot(str)
+    def _on_pause_symbol(self, symbol: str):
+        """Pause a specific symbol's processing"""
+        if self.pipeline_controller:
+            self.pipeline_controller.pause_symbol(symbol)
+            # IMMEDIATELY update UI pause state (don't wait for progress signal)
+            self.monitor_panel.queue_table.set_symbol_paused(symbol, True)
+            self.status_bar.showMessage(f"Paused {symbol}", 2000)
+
+    @pyqtSlot(str)
+    def _on_resume_symbol(self, symbol: str):
+        """Resume a specific symbol's processing"""
+        if self.pipeline_controller:
+            self.pipeline_controller.resume_symbol(symbol)
+            # IMMEDIATELY update UI pause state (don't wait for progress signal)
+            self.monitor_panel.queue_table.set_symbol_paused(symbol, False)
+            self.status_bar.showMessage(f"Resumed {symbol}", 2000)
+
+    @pyqtSlot(str)
+    def _on_cancel_symbol(self, symbol: str):
+        """Cancel a specific symbol's processing"""
+        reply = QMessageBox.question(
+            self,
+            "Confirm Cancel",
+            f"Cancel processing for {symbol}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            if self.pipeline_controller:
+                self.pipeline_controller.cancel_symbol(symbol)
+                self.status_bar.showMessage(f"Cancelled {symbol}", 2000)
+
+    @pyqtSlot(str)
+    def _on_skip_symbol(self, symbol: str):
+        """Skip a specific symbol"""
+        reply = QMessageBox.question(
+            self,
+            "Confirm Skip",
+            f"Skip processing for {symbol}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            if self.pipeline_controller:
+                self.pipeline_controller.skip_symbol(symbol)
+                self.status_bar.showMessage(f"Skipped {symbol}", 2000)
+
+    @pyqtSlot(str)
+    def _on_remove_symbol(self, symbol: str):
+        """Remove a symbol from queue table"""
+        self.monitor_panel.queue_table.remove_symbol(symbol)
+        self.status_bar.showMessage(f"Removed {symbol} from queue", 2000)
+
+    @pyqtSlot(str)
+    def _on_view_profile(self, symbol: str):
+        """View symbol profile"""
+        # TODO: Open profile viewer dialog
+        self.status_bar.showMessage(f"Viewing profile for {symbol}", 2000)
+        print(f"View profile for {symbol}")

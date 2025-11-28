@@ -1,183 +1,76 @@
-# Minute Data Pipeline
+# Minute Data Pipeline & Desktop Dashboard
 
-A production-ready Python platform for fetching, engineering, storing, and exploring historical minute‑level equity data from the EODHD API. Includes:
-- High‑performance feature engineering (technical, statistical, microstructure, regime, predictive labels)
-- MongoDB persistence with indexing & profile lifecycle operations
-- Adaptive rate limiting & chunked historical backfill (30‑day efficiency strategy)
-- A PyQt6 Desktop Dashboard for orchestration, monitoring, editing profiles, and settings management
-- Extensive documentation & release notes under `docs/`
+## Overview
+This project provides a minute-level stock market data pipeline plus a native PyQt6 desktop dashboard for controlling, monitoring, and editing processed symbol profiles.
 
----
-## ✅ Highlights
-| Area | What You Get |
-|------|--------------|
-| Data Ingestion | Minute history (multi-year), fundamentals, configurable intervals |
-| Feature Engineering | 200+ derived indicators & metrics across technical/statistical/regime/labels |
-| Storage | Structured company profiles in MongoDB with indexes & metadata |
-| Desktop Dashboard | Parallel processing, live metrics, logs, API usage gauges, profile browser/editor |
-| Reliability | Auto-reconnect MongoDB, exception handling, safe JSON editing, configurable rate limits |
-| Performance | 30‑day chunk fetch (≈6× fewer API calls), multi-thread parallel symbol workers |
-| Documentation | Quick reference, guides, architectural overview, release/fix notes |
+Core capabilities:
+- Parallel per-symbol processing (each worker completes full lifecycle independently)
+- Adaptive per-worker rate limiting (minute & daily quotas)
+- 200+ engineered features (technical, statistical, microstructure, risk, multi-timeframe)
+- MongoDB persistence of rich profile objects
+- Real-time dashboard: queue table, micro-stage progress, logs, API usage, ETA
+- Profile browser & editor with JSON view and feature tabs
+- Incremental vs full historical backfill (30-day chunk strategy, adjustable years / up to 30 or full history)
+- Persistent API usage counters across sessions
+- Email alerts on critical errors (optional, with screenshot)
 
----
-## 📦 Repository Organization
+## Architecture
 ```
-Minute_Data_Pipeline/
-├── dashboard/                # PyQt6 desktop application (UI, controllers, widgets, utils)
-├── docs/                     # Core documentation & guides
-│   ├── release_notes/        # Versioned & fix-focused markdown files
-│   ├── ARCHITECTURE.md       # High-level system design
-│   ├── API_REFERENCE.md      # Public APIs & usage
-│   ├── QUICK_REF.md          # Fast start cheat sheet
-│   ├── GETTING_STARTED.md    # Step-by-step onboarding
-│   ├── DASHBOARD_GUIDE.md    # Full dashboard walkthrough
-│   ├── README_DASHBOARD.md   # Technical dashboard internals
-│   └── ... (additional guides & summaries)
-├── feature_engineering.py    # FeatureEngineer class (full pipeline)
-├── data_fetcher.py           # EODHD data retrieval & rate limiting integration
-├── mongodb_storage.py        # MongoDBStorage class (CRUD + indexing)
-├── pipeline.py               # MinuteDataPipeline orchestrator (symbol processing)
-├── config.py                 # Pydantic settings from environment
-├── utils/                    # Shared utility modules
-├── scripts/                  # Operational scripts (backfill, benchmark, tests)
-├── tests/                    # Test suite (unit/functional)
-├── tmp/                      # Transient test outputs / generated artifacts (ignored)
-├── logs/                     # Runtime logs (rotating)
-├── requirements.txt          # Python dependencies
-├── VERSION                   # Current semantic version
-├── CHANGELOG.md              # Aggregated release notes
-└── README.md                 # This overview
+dashboard/
+  main.py                # Entry point
+  ui/                    # Panels and widgets
+  controllers/           # Pipeline & database controllers
+  services/              # Metrics, email alerts
+  utils/                 # Signals, theme, helpers
+pipeline.py              # Core pipeline orchestrator
+feature_engineering.py   # Feature engineering engine
+data_fetcher.py          # EODHD API integration & historical fetch logic
+mongodb_storage.py       # MongoDB profile persistence
+config.py                # Settings / env configuration
 ```
 
----
-## 🚀 Quick Start
-### 1. Clone & Environment
-```powershell
-# From desired parent directory
-git clone https://github.com/shiva2321/Minute_Data_Pipeline.git
-cd Minute_Data_Pipeline
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-Copy-Item .env.example .env  # then edit .env with your API key & MongoDB URI
+## Running the Dashboard (Windows)
 ```
-Minimum required in `.env`:
-```
-EODHD_API_KEY=your_key_here
-MONGODB_URI=mongodb://localhost:27017/
-```
-Optional overrides (defaults in `config.py`):
-```
-MONGODB_DATABASE=stock_data
-MONGODB_COLLECTION=company_profiles
-HISTORY_CHUNK_DAYS=30
-API_CALLS_PER_MINUTE=80
-API_CALLS_PER_DAY=95000
-MAX_WORKERS=10
-```
-
-### 2. Run Desktop Dashboard
-```powershell
-# Launch dashboard (creates window)
 run_dashboard.bat
 ```
-Or directly:
-```powershell
-.\.venv\Scripts\python.exe dashboard\main.py
-```
+The batch script will activate the virtual environment, ensure dependencies, and launch the UI. On normal close it reports "Dashboard closed normally." Errors display exit code.
 
-### 3. Programmatic Pipeline Usage
-```python
-from pipeline import MinuteDataPipeline
-pipeline = MinuteDataPipeline()
-# Full symbol processing (historical + features + storage)
-pipeline.process_symbol(symbol='AAPL', exchange='US', interval='1m', from_date=None, to_date=None)
-```
+## Email Alerts Configuration
+Set in Settings tab or via environment variables for better security:
+- PIPELINE_ALERT_EMAIL
+- PIPELINE_ALERT_PASSWORD
+These override sender email & password fields if present.
+On ERROR / CRITICAL log events a single alert (rate-limited ~5 min) is sent with recent message and PNG screenshot.
 
-### 4. Tests
-```powershell
-pip install -r requirements.txt
-python -m pytest -q tests
-```
+## Incremental vs Full History
+- Full backfill: Fetches history in 30-day batches up to selected years (or entire available history).
+- Incremental update: Only fetches new data since last stored end date and recomputes features.
 
----
-## 🖥 Dashboard Feature Summary
-- Parallel symbol processing (independent rate limiters per worker)
-- Live status table (queued, processing, success, failed) with progress updates
-- API usage gauges (minute/day consumption with color thresholds)
-- Log viewer (INFO/WARN/ERROR/SUCCESS color-coded, auto-scroll)
-- Profile Browser (search, sort, view, edit, delete, export JSON)
-- Profile Editor (overview + grouped feature tabs + raw JSON validation)
-- Settings Panel (API keys, MongoDB connectivity test, pipeline defaults, UI theme)
-- Automatic ETA calculation & 10s metrics refresh cadence
+## Feature Tabs Mapping
+If specific sections (price_features, volume_features, volatility_features) are absent, they are mapped to:
+- Price -> statistical_features + performance_metrics
+- Volume -> microstructure_features
+- Volatility -> risk_metrics + performance_metrics
 
----
-## 🧠 Feature Engineering Coverage (High-Level)
-- Technical: SMA/EMA (multi window), Bollinger metrics, RSI, MACD, ATR, Stochastic, momentum, ROC
-- Statistical: Price & return distributions, skewness, kurtosis, volatility clusters, ratios
-- Microstructure: Volume patterns, liquidity proxies, imbalance, spread-derived metrics
-- Time-Based: Session segmentation, rolling time-of-day behaviors
-- Regime: Volatility/trend/liquidity regime signals
-- Predictive Labels: Forward returns (multi-horizon), breakout classification, realized vol targets
-- Quality: Missing/duplicate counts, completeness ratios
+## Persistent API Usage
+Daily API call counts persist via cache store and reset automatically when a new day starts.
 
----
-## 📄 Key Documentation (All under `docs/`)
-| Guide | Path |
-|-------|------|
-| Quick Reference | `docs/QUICK_REF.md` |
-| Getting Started | `docs/GETTING_STARTED.md` |
-| Dashboard User Guide | `docs/DASHBOARD_GUIDE.md` |
-| Dashboard Internals | `docs/README_DASHBOARD.md` |
-| Architecture | `docs/ARCHITECTURE.md` |
-| API Reference | `docs/API_REFERENCE.md` |
-| Release Notes (Fixes) | `docs/release_notes/` |
-| Setup & Environment | `docs/SETUP.md` |
-| Index / Navigation | `docs/INDEX.md` |
+## Roadmap / Next Enhancements
+- Fine-grained feature engineering progress callbacks
+- Re-process dialog (full vs incremental with preview)
+- System tray & desktop notifications
+- Advanced company universe management (auto-refresh listings)
 
----
-## 📝 Release Notes & Fix History
-Detailed fix and iteration records live in `docs/release_notes/` (e.g., `FEATURE_ENGINEERING_FIX.md`, `FINAL_CRITICAL_FIXES.md`). For consolidated version changes see `CHANGELOG.md` and semantic version in `VERSION`.
+## Requirements
+See `requirements.txt` (ensure PyQt6, pymongo, requests, loguru, scipy, scikit-learn etc.).
 
----
-## ⚙️ Configuration Model
-All runtime settings resolved via `config.py` (Pydantic). Override via environment / `.env`. Review `config.py` for accepted variables & defaults.
+## Security Notes
+Use app-specific passwords (e.g., Gmail App Password) for SMTP. Avoid storing real credentials in plain text; prefer environment variables.
 
----
-## 🔐 Safety & Data Integrity
-- Defensive exception handling around profile CRUD & JSON edits
-- Datetime normalization for UI components
-- Auto-reconnect MongoDB wrapper with caching to reduce query load
-- Rate limiter safeguards (minute/day quotas & backoff)
+## Troubleshooting
+- If dashboard shows no profiles: verify MongoDB connection & collection names in Settings.
+- If rate limits are hit early: reduce workers or increase chunk days.
+- Email not sent: confirm SMTP server/port and that env vars override UI fields correctly.
 
----
-## 🧪 Testing Strategy
-Current tests (see `tests/`):
-- Feature engineering calculations
-- Rate limiter behavior
-- Dashboard import & structural integrity
-Future improvements (PRs welcome): deeper integration tests (pipeline end-to-end), performance benchmarks, mock API latency harness.
-
----
-## 🤝 Contributing
-1. Fork & branch: `feat/your-feature` or `fix/issue-id`
-2. Add/adjust tests where behavior changes
-3. Run `pytest` locally before PR
-4. Update `CHANGELOG.md` & docs if appropriate
-
-Planned enhancements in roadmap (see `docs/PROJECT_SUMMARY.md` or release notes): streaming ingestion, scheduling, advanced ML labeling, visualization layer, cross-exchange expansion.
-
----
-## 📬 Support & Troubleshooting
-| Symptom | Check |
-|---------|-------|
-| Empty profiles | MongoDB URI & collection names; logs/ for exceptions |
-| Slow fetch | Confirm chunk size = 30 days; rate limits not saturated |
-| API errors | Validate `EODHD_API_KEY` and daily quota usage |
-| Dashboard UI freeze | Ensure workers <= physical/logical cores (≤10 recommended here) |
-
-Logs: `logs/pipeline_YYYY-MM-DD.log`
-
----
-## 📄 License
-MIT (see future LICENSE file if added). Use freely with attribution; contributions welcome.
+## License
+Internal / Proprietary (update as needed).

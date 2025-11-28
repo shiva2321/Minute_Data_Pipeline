@@ -17,6 +17,7 @@ from config import settings
 from pipeline import MinuteDataPipeline
 from utils.rate_limiter import AdaptiveRateLimiter
 from dashboard.utils.qt_signals import PipelineSignals
+from dashboard.services import MetricsCalculator
 
 
 class PipelineController(QThread):
@@ -62,13 +63,39 @@ class PipelineController(QThread):
         self.last_update_time = time.time()
         self.update_interval = 10  # Update every 10 seconds
 
+        # Initialize metrics calculator
+        self.metrics_calc = MetricsCalculator()
+
         # Aggregated API stats from all workers
         self.total_api_calls = 0
         self.total_daily_calls = 0
 
+        # Track start times for duration
+        self.symbol_start_times = {}
+
+        # Cooperative control events
+        from threading import Event, Lock
+        self._pause_event = Event()  # when set => paused (global)
+        self._cancel_event = Event()  # when set => cancel operations (global)
+
+        # Per-symbol control
+        self.symbol_control = {}  # symbol -> {'paused': Event, 'cancelled': Event, 'status': str, 'was_paused': bool}
+        self.symbol_lock = Lock()
+        for symbol in symbols:
+            self.symbol_control[symbol] = {
+                'paused': Event(),
+                'cancelled': Event(),
+                'status': 'queued',
+                'was_paused': False,  # Track if symbol is currently paused
+                'future': None
+            }
+
     def run(self):
         """Main processing loop - truly parallel execution"""
         self.stats['start_time'] = time.time()
+
+        # Initialize metrics calculator
+        self.metrics_calc.initialize(len(self.symbols), self.stats['start_time'])
 
         self.signals.log_message.emit('INFO', f'Starting pipeline for {len(self.symbols)} symbols with {self.executor._max_workers} workers')
         self.signals.log_message.emit('INFO', f'Per-worker rate limits: {self.per_worker_minute_limit}/min, {self.per_worker_daily_limit}/day')
@@ -81,12 +108,17 @@ class PipelineController(QThread):
             if self.is_stopped:
                 break
 
+            self.symbol_start_times[symbol] = time.time()
+
             future = self.executor.submit(
                 self._process_symbol_worker,
                 symbol,
                 self.config
             )
             futures[future] = symbol
+
+            # Track symbol start time for metrics
+            self.metrics_calc.mark_symbol_started(symbol, time.time())
 
             # Emit symbol started
             self.signals.symbol_started.emit(symbol)
@@ -104,11 +136,17 @@ class PipelineController(QThread):
 
                 if result['status'] == 'success':
                     self.stats['completed'] += 1
+                    # Mark completion in metrics
+                    self.metrics_calc.mark_symbol_completed(symbol)
+                    with self.symbol_lock:
+                        self.symbol_control[symbol]['status'] = 'completed'
                     self.signals.symbol_completed.emit(symbol, result['profile'])
                     self.signals.log_message.emit('SUCCESS', f'{symbol} completed successfully')
                 else:
                     self.stats['failed'] += 1
                     error_msg = result.get('error', 'Unknown error')
+                    with self.symbol_lock:
+                        self.symbol_control[symbol]['status'] = 'failed'
                     self.signals.symbol_failed.emit(symbol, error_msg)
                     self.signals.log_message.emit('ERROR', f'{symbol}: {error_msg}')
 
@@ -131,7 +169,8 @@ class PipelineController(QThread):
 
         # Final update
         self.stats['end_time'] = time.time()
-        duration = self.stats['end_time'] - self.stats['start_time']
+        start_time_val = self.stats.get('start_time') or self.metrics_calc.start_time or time.time()
+        duration = self.stats['end_time'] - start_time_val if start_time_val else 0.0
 
         summary = {
             'completed': self.stats['completed'],
@@ -149,25 +188,37 @@ class PipelineController(QThread):
         )
 
     def _emit_progress_update(self):
-        """Emit progress updates for ETA and metrics"""
-        if self.stats['start_time']:
-            elapsed = time.time() - self.stats['start_time']
-            completed = self.stats['completed'] + self.stats['failed']
+        """Emit progress updates for ETA and metrics using MetricsCalculator"""
+        # Determine processing count as total - completed - failed
+        processing_count = max(0, self.stats.get('total', 0) - self.stats.get('completed', 0) - self.stats.get('failed', 0))
 
-            if completed > 0:
-                avg_time_per_symbol = elapsed / completed
-                remaining = self.stats['total'] - completed
-                eta_seconds = int(avg_time_per_symbol * remaining)
+        # Get metrics from calculator
+        metrics_stats = self.metrics_calc.get_summary_stats(processing_count)
+        eta_seconds = metrics_stats.get('eta_seconds', 0) or 0
 
-                self.signals.eta_updated.emit(eta_seconds)
+        # Emit ETA signal
+        self.signals.eta_updated.emit(int(eta_seconds))
 
-            # Emit aggregated API stats
-            api_stats = {
-                'minute_calls': 0,  # Can't track per-minute across workers easily
-                'daily_calls': self.total_daily_calls,
-                'daily_remaining': self.config.get('api_calls_per_day', 95000) - self.total_daily_calls
-            }
-            self.signals.api_stats_updated.emit(api_stats)
+        # Emit metrics signal with comprehensive stats
+        metrics_data = {
+            'progress_percent': metrics_stats.get('progress_percent', 0),
+            'completed': metrics_stats.get('completed', 0),
+            'remaining': metrics_stats.get('remaining', 0),
+            'processing': processing_count,
+            'eta_seconds': eta_seconds,
+            'eta_string': metrics_stats.get('eta_string', 'Calculating...'),
+            'throughput': metrics_stats.get('throughput_symbols_per_minute', 0),
+            'elapsed': metrics_stats.get('elapsed_seconds', 0)
+        }
+        self.signals.metrics_updated.emit(metrics_data)
+
+        # Emit aggregated API stats
+        api_stats = {
+            'minute_calls': 0,  # Can't track per-minute across workers easily
+            'daily_calls': self.total_daily_calls,
+            'daily_remaining': self.config.get('api_calls_per_day', 95000) - self.total_daily_calls
+        }
+        self.signals.api_stats_updated.emit(api_stats)
 
     def _process_symbol_worker(self, symbol: str, config: Dict) -> Dict:
         """
@@ -196,27 +247,39 @@ class PipelineController(QThread):
             # Inject the independent rate limiter
             pipeline.data_fetcher.rate_limiter = worker_rate_limiter
 
-            # Progress callback
-            def progress_callback(status: str, progress: int, **kwargs):
-                self.signals.symbol_progress.emit(symbol, status, progress)
-                self.signals.log_message.emit('INFO', f'{symbol}: {status} ({progress}%)')
+            # Inject cooperative events
+            pipeline.data_fetcher.pause_event = self._pause_event
+            pipeline.data_fetcher.cancel_event = self._cancel_event
+            # Inject per-symbol control events
+            pipeline.data_fetcher.symbol_pause_event = self.symbol_control[symbol]['paused']
+            pipeline.data_fetcher.symbol_cancel_event = self.symbol_control[symbol]['cancelled']
 
-                # Get API stats from this worker's rate limiter
+            # Update status to running
+            with self.symbol_lock:
+                self.symbol_control[symbol]['status'] = 'running'
+
+            # Progress callback with micro-stage updates
+            def progress_callback(status: str, progress: int, micro_stage: str = '-', data_points: int = 0):
+                # Gather API stats
                 stats = worker_rate_limiter.get_stats()
-                nonlocal api_calls_used
-                api_calls_used = stats.get('daily_calls', 0)
+                api_used = stats.get('daily_calls', 0)
+                duration_seconds = time.time() - self.symbol_start_times[symbol]
 
-                # Update with worker-specific data
-                kwargs_with_data = {
-                    'data_points': kwargs.get('data_points', 0),
-                    'api_calls': api_calls_used,
-                    **kwargs
-                }
-                self.signals.symbol_progress.emit(symbol, status, progress)
+                # Check if paused
+                is_paused = self.symbol_control[symbol]['paused'].is_set()
+
+                # Log the update
+                if micro_stage and micro_stage != '-':
+                    self.signals.log_message.emit('INFO', f'{symbol}: {status} - {micro_stage} ({progress}%)')
+                else:
+                    self.signals.log_message.emit('INFO', f'{symbol}: {status} ({progress}%)')
+
+                # Emit positional args with pause state
+                self.signals.symbol_progress.emit(symbol, status, int(progress), micro_stage or '-', int(data_points), int(api_used), float(duration_seconds), is_paused)
 
             # Log start
             self.signals.log_message.emit('INFO', f'Processing {symbol}...')
-            progress_callback('Starting', 0)
+            progress_callback('Starting', 0, micro_stage='Initialization')
 
             # Check mode
             mode = config.get('mode', 'incremental')
@@ -255,24 +318,69 @@ class PipelineController(QThread):
         max_years: int,
         progress_callback: Callable
     ) -> Dict:
-        """Full historical backfill with 30-day chunks"""
-        progress_callback('Fetching history', 10)
+        """
+        Full backfill of historical data with micro-stage updates
 
-        # Fetch full history (uses 30-day chunks internally in data_fetcher)
-        df = pipeline.data_fetcher.fetch_full_history(
-            symbol=symbol,
-            max_years=max_years
-        )
+        Args:
+            pipeline: MinuteDataPipeline instance
+            symbol: Ticker symbol
+            max_years: Number of years to fetch
+            progress_callback: Callback for progress updates
 
-        if df.empty:
-            raise ValueError("No data retrieved")
+        Returns:
+            Company profile dictionary
+        """
+        from datetime import datetime, timedelta
+        import time
 
-        progress_callback('Engineering features', 50, data_points=len(df))
+        start_time = time.time()
 
-        # Calculate all features
+        # Calculate date range
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=365 * max_years)
+
+        # Estimate number of batches (30-day chunks)
+        total_days = (end_date - start_date).days
+        batch_days = 30
+        total_batches = (total_days // batch_days) + 1
+
+        # Fetch data in chunks with micro-stage updates
+        all_data = []
+        for batch_num in range(total_batches):
+            batch_start = start_date + timedelta(days=batch_num * batch_days)
+            batch_end = min(batch_start + timedelta(days=batch_days), end_date)
+
+            # Calculate progress
+            progress = int((batch_num / max(1,total_batches)) * 45)
+            micro_stage = f'Fetch batch {batch_num+1}/{total_batches}'
+            progress_callback('Fetching', progress, micro_stage=micro_stage)
+
+            # Fetch this batch
+            df_batch = pipeline.data_fetcher.fetch_intraday_data(
+                symbol=symbol,
+                from_date=batch_start.strftime('%Y-%m-%d'),
+                to_date=batch_end.strftime('%Y-%m-%d')
+            )
+
+            if not df_batch.empty:
+                all_data.append(df_batch)
+
+        # Combine all data
+        if not all_data:
+            raise ValueError(f"No data retrieved for {symbol}")
+
+        import pandas as pd
+        df = pd.concat(all_data, ignore_index=True).drop_duplicates().reset_index(drop=True)
+
+        # Engineering features with micro-stage updates
+        total_features = 200  # Approximate
+        progress_callback('Engineering', 50, micro_stage='Starting feature pipeline', data_points=len(df))
+
+        # Calculate all features with periodic updates
         features = pipeline.feature_engineer.process_full_pipeline(df)
 
-        progress_callback('Creating profile', 70)
+        progress_callback('Engineering', 65, micro_stage='Finalizing features', data_points=len(df))
+        progress_callback('Creating', 70, micro_stage='Building profile object')
 
         # Create company profile
         profile = pipeline.storage.create_company_profile(
@@ -283,12 +391,12 @@ class PipelineController(QThread):
             fundamental_data={}
         )
 
-        progress_callback('Storing profile', 90)
+        progress_callback('Storing', 90, micro_stage='Writing to MongoDB')
 
         # Save to database
         pipeline.storage.save_profile(profile)
 
-        progress_callback('Complete', 100)
+        progress_callback('Complete', 100, micro_stage='Done')
 
         return profile
 
@@ -300,7 +408,7 @@ class PipelineController(QThread):
         progress_callback: Callable
     ) -> Dict:
         """Incremental update of existing profile"""
-        progress_callback('Fetching new data', 10)
+        progress_callback('Fetching', 10, micro_stage='Incremental new data')
 
         # Get last update date
         last_date = existing_profile.get('data_date_range', {}).get('end')
@@ -312,15 +420,15 @@ class PipelineController(QThread):
         )
 
         if df.empty:
-            progress_callback('No new data', 100)
+            progress_callback('Complete', 100, micro_stage='No new data')
             return existing_profile
 
-        progress_callback('Engineering features', 50, data_points=len(df))
+        progress_callback('Engineering', 50, micro_stage='Recomputing features', data_points=len(df))
 
         # Recalculate features
         features = pipeline.feature_engineer.process_full_pipeline(df)
 
-        progress_callback('Creating profile', 70)
+        progress_callback('Creating', 70, micro_stage='Merging profile')
 
         # Create updated profile
         profile = pipeline.storage.create_company_profile(
@@ -331,25 +439,125 @@ class PipelineController(QThread):
             fundamental_data={}
         )
 
-        progress_callback('Storing profile', 90)
+        progress_callback('Storing', 90, micro_stage='Updating MongoDB')
 
         # Update in database
         pipeline.storage.update_profile(symbol, profile)
 
-        progress_callback('Complete', 100)
+        progress_callback('Complete', 100, micro_stage='Done')
 
         return profile
 
+    # ==================== GLOBAL PIPELINE CONTROL ====================
+
     def pause(self):
-        """Pause processing"""
+        """Pause all processing - workers will block before/after API calls"""
         self.is_paused = True
+        # Set pause event so fetchers pause cooperatively
+        self._pause_event.set()
         self.signals.pipeline_paused.emit()
-        self.signals.log_message.emit('WARNING', 'Pipeline paused')
+        self.signals.log_message.emit('WARNING', 'Pipeline paused - all workers pausing between API calls')
+
+    def resume(self):
+        """Resume all processing after pause"""
+        self.is_paused = False
+        self._pause_event.clear()
+        self.signals.log_message.emit('INFO', 'Pipeline resumed')
 
     def stop(self):
-        """Stop all processing"""
+        """Stop all processing immediately"""
         self.is_stopped = True
-        self.executor.shutdown(wait=False, cancel_futures=True)
+        # Trigger cooperative cancel; in-flight requests will raise and exit
+        self._cancel_event.set()
+        self._pause_event.clear()
+        self.signals.log_message.emit('ERROR', 'Pipeline stopped - terminating all workers')
+        try:
+            self.executor.shutdown(wait=False, cancel_futures=True)
+        except:
+            pass
         self.signals.pipeline_stopped.emit()
-        self.signals.log_message.emit('ERROR', 'Pipeline stopped')
 
+    def clear(self):
+        """Clear the queue and stop processing"""
+        self.is_stopped = True
+        self.signals.log_message.emit('INFO', 'Clearing pipeline queue')
+
+        self._cancel_event.set()
+        self._pause_event.clear()
+
+        # Stop executor
+        try:
+            self.executor.shutdown(wait=False, cancel_futures=True)
+        except:
+            pass
+        
+        # Reset stats
+        self.stats = {
+            'total': 0,
+            'completed': 0,
+            'failed': 0,
+            'skipped': 0,
+            'start_time': None,
+            'end_time': None
+        }
+        
+        self.signals.pipeline_cleared.emit()
+        self.signals.pipeline_stopped.emit()
+        self.signals.log_message.emit('INFO', 'Pipeline cleared')
+
+    # ==================== PER-SYMBOL CONTROL ====================
+
+    def pause_symbol(self, symbol: str):
+        """Pause a specific symbol's processing"""
+        if symbol not in self.symbol_control:
+            return
+        with self.symbol_lock:
+            self.symbol_control[symbol]['paused'].set()
+            self.symbol_control[symbol]['was_paused'] = True
+        self.signals.log_message.emit('WARNING', f'⏸ {symbol}: NOW PAUSED (waiting for resume)')
+
+    def resume_symbol(self, symbol: str):
+        """Resume a specific symbol's processing"""
+        if symbol not in self.symbol_control:
+            return
+        with self.symbol_lock:
+            self.symbol_control[symbol]['paused'].clear()
+            self.symbol_control[symbol]['was_paused'] = False
+        self.signals.log_message.emit('INFO', f'▶ {symbol}: RESUMED (continuing processing)')
+
+    def cancel_symbol(self, symbol: str):
+        """Cancel a specific symbol's processing"""
+        if symbol not in self.symbol_control:
+            return
+        with self.symbol_lock:
+            self.symbol_control[symbol]['cancelled'].set()
+        self.signals.log_message.emit('WARNING', f'{symbol}: Cancelled')
+
+    def skip_symbol(self, symbol: str):
+        """Skip a symbol - remove from queue"""
+        if symbol not in self.symbol_control:
+            return
+        with self.symbol_lock:
+            self.symbol_control[symbol]['cancelled'].set()
+            self.symbol_control[symbol]['status'] = 'skipped'
+        self.stats['skipped'] += 1
+        self.signals.log_message.emit('INFO', f'{symbol}: Skipped by user')
+
+    def get_symbol_status(self, symbol: str) -> str:
+        """Get current status of a symbol"""
+        if symbol not in self.symbol_control:
+            return 'unknown'
+        with self.symbol_lock:
+            return self.symbol_control[symbol]['status']
+
+    def is_symbol_paused(self, symbol: str) -> bool:
+        """Check if symbol is currently paused"""
+        if symbol not in self.symbol_control:
+            return False
+        with self.symbol_lock:
+            return self.symbol_control[symbol]['paused'].is_set()
+
+    def get_all_statuses(self) -> Dict[str, str]:
+        """Get status of all symbols"""
+        with self.symbol_lock:
+            return {symbol: info['status'] for symbol, info in self.symbol_control.items()}

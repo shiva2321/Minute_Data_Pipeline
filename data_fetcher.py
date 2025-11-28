@@ -10,6 +10,7 @@ import time
 from config import settings
 from utils.rate_limiter import AdaptiveRateLimiter
 import logging
+from threading import Event
 
 
 class EODHDDataFetcher:
@@ -26,7 +27,43 @@ class EODHDDataFetcher:
         self.base_url = settings.eodhd_base_url
         self.session = requests.Session()
         self.rate_limiter = AdaptiveRateLimiter(settings.api_calls_per_minute, settings.api_calls_per_day)
+        # Cooperative control flags (injected by controller)
+        self.cancel_event: Optional[Event] = None
+        self.pause_event: Optional[Event] = None
+        # Per-symbol control (injected by controller)
+        self.symbol_pause_event: Optional[Event] = None
+        self.symbol_cancel_event: Optional[Event] = None
         self.logger = logging.getLogger(__name__)
+
+    def _respect_pause_cancel(self):
+        """Cooperatively respect pause and cancel events (global and symbol-specific)"""
+        # Per-symbol pause handling
+        if self.symbol_pause_event is not None:
+            while self.symbol_pause_event.is_set():
+                time.sleep(0.25)
+        # Global pause handling
+        if self.pause_event is not None:
+            while self.pause_event.is_set():
+                time.sleep(0.25)
+        # Per-symbol cancel handling
+        if self.symbol_cancel_event is not None and self.symbol_cancel_event.is_set():
+            raise RuntimeError("Operation cancelled")
+        # Global cancel handling
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            raise RuntimeError("Operation cancelled")
+
+    def _throttle_before_call(self):
+        """Apply rate limiting and pause/cancel before a network call"""
+        self._respect_pause_cancel()
+        # Rate limiter wait
+        if hasattr(self, 'rate_limiter') and self.rate_limiter:
+            self.rate_limiter.wait_if_needed()
+
+    def _record_after_call(self):
+        """Record API call and re-check control flags"""
+        if hasattr(self, 'rate_limiter') and self.rate_limiter:
+            self.rate_limiter.record_call()
+        self._respect_pause_cancel()
 
     def fetch_intraday_data(
         self,
@@ -71,7 +108,10 @@ class EODHDDataFetcher:
         ranged_params = {**base_params, 'from': from_ts, 'to': to_ts}
 
         def _request(params):
+            # Apply pause/stop + rate limit per request
+            self._throttle_before_call()
             response = self.session.get(url, params=params, timeout=30)
+            self._record_after_call()
             response.raise_for_status()
             return response.json()
 
@@ -156,7 +196,7 @@ class EODHDDataFetcher:
     def fetch_intraday_with_retry(self, symbol: str, from_dt: datetime, to_dt: datetime, interval: str = '1m', exchange: str = 'US', max_retries: int = 3) -> pd.DataFrame:
         for attempt in range(max_retries):
             try:
-                self.rate_limiter.wait_if_needed()
+                self._throttle_before_call()
                 url = f"{self.base_url}/intraday/{symbol}.{exchange}"
                 params = {
                     'api_token': self.api_key,
@@ -166,6 +206,8 @@ class EODHDDataFetcher:
                     'fmt': 'json'
                 }
                 resp = self.session.get(url, params=params, timeout=30)
+                self._record_after_call()
+
                 if resp.status_code == 429:
                     self.logger.warning(f"429 Rate limit for {symbol}; backing off")
                     self.rate_limiter.record_error(settings.initial_retry_delay, settings.max_retry_delay)
@@ -177,7 +219,6 @@ class EODHDDataFetcher:
                     self.logger.error(f"API error {resp.status_code}: {resp.text[:200]}")
                     self.rate_limiter.record_error(settings.initial_retry_delay, settings.max_retry_delay)
                     continue
-                self.rate_limiter.record_call()
                 data = resp.json()
                 if not data:
                     return pd.DataFrame()
@@ -220,7 +261,9 @@ class EODHDDataFetcher:
 
         try:
             logger.info(f"Fetching fundamental data for {symbol}")
+            self._throttle_before_call()
             response = self.session.get(url, params=params, timeout=30)
+            self._record_after_call()
             response.raise_for_status()
 
             data = response.json()
@@ -260,7 +303,8 @@ class EODHDDataFetcher:
             try:
                 df = self.fetch_intraday_data(symbol, interval, from_date, to_date, exchange)
                 results[symbol] = df
-                time.sleep(delay)  # Rate limiting
+                # Keep a tiny inter-symbol gap to avoid burstiness
+                time.sleep(min(0.25, max(0.0, delay)))
             except Exception as e:
                 logger.error(f"Failed to fetch data for {symbol}: {e}")
                 results[symbol] = pd.DataFrame()
@@ -301,6 +345,8 @@ class EODHDDataFetcher:
         total_chunks = 0
         start_time = datetime.now()
         while end_cursor.year >= start_year and consecutive_empty < 5:
+            # Cooperatively pause/cancel between chunks
+            self._respect_pause_cancel()
             start_cursor = end_cursor - timedelta(days=chunk_days)
             from_date = start_cursor.strftime('%Y-%m-%d')
             to_date = end_cursor.strftime('%Y-%m-%d')
@@ -325,6 +371,42 @@ class EODHDDataFetcher:
         duration = (datetime.now() - start_time).total_seconds()
         self.logger.info(f"Backfill duration {duration:.1f}s, chunks {total_chunks}, API calls today {self.rate_limiter.get_stats()['daily_calls']}")
         return full
+
+    def fetch_exchange_symbols(self, exchange: str = 'US', skip_delisted: bool = True) -> List[Dict]:
+        """
+        Fetch all symbols listed on an exchange from EODHD
+
+        Args:
+            exchange: Exchange code (e.g., 'US', 'NASDAQ', 'NYSE')
+            skip_delisted: Skip delisted companies
+
+        Returns:
+            List of dictionaries with symbol, name, exchange, country, currency, etc.
+        """
+        url = f"{self.base_url}/exchange-symbol-list/{exchange}"
+
+        params = {
+            'api_token': self.api_key,
+            'fmt': 'json'
+        }
+
+        try:
+            self._throttle_before_call()
+            response = self.session.get(url, params=params, timeout=60)
+            self._record_after_call()
+            response.raise_for_status()
+            data = response.json() or []
+
+            if skip_delisted:
+                active_only = [s for s in data if s.get('active', True)]
+                logger.info(f"Fetched {len(active_only)} active symbols from {exchange}")
+                return active_only
+            else:
+                logger.info(f"Fetched {len(data)} symbols from {exchange}")
+                return data
+        except Exception as e:
+            logger.error(f"Failed to fetch {exchange} symbols: {e}")
+            return []
 
     def __del__(self):
         """Close the session when the object is destroyed"""

@@ -3,10 +3,11 @@ Control Panel - User input and pipeline controls
 """
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
                               QLineEdit, QPushButton, QRadioButton, QCheckBox,
-                              QSpinBox, QLabel, QFileDialog, QMessageBox)
+                              QSpinBox, QLabel, QFileDialog, QMessageBox, QComboBox)
 from PyQt6.QtCore import pyqtSignal, Qt
 from typing import List, Dict
 import os
+from pathlib import Path
 
 
 class ControlPanel(QWidget):
@@ -20,9 +21,10 @@ class ControlPanel(QWidget):
     stop_clicked = pyqtSignal()
     clear_clicked = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, cache_store=None, parent=None):
         super().__init__(parent)
 
+        self.cache_store = cache_store
         self.is_running = False
         self.init_ui()
 
@@ -48,7 +50,36 @@ class ControlPanel(QWidget):
 
         symbol_layout.addLayout(input_layout)
 
-        # File input
+        # Company selector buttons
+        company_btn_layout = QHBoxLayout()
+        company_btn_layout.addWidget(QLabel("Quick Select:"))
+
+        # Top N input
+        company_btn_layout.addWidget(QLabel("Top N:"))
+        self.top_n_spin = QSpinBox()
+        self.top_n_spin.setMinimum(1)
+        self.top_n_spin.setMaximum(500)
+        self.top_n_spin.setValue(10)
+        self.top_n_spin.setMaximumWidth(80)
+        company_btn_layout.addWidget(self.top_n_spin)
+
+        self.top_n_btn = QPushButton("📊 Select Top N")
+        self.top_n_btn.setToolTip("Select top N US companies")
+        self.top_n_btn.clicked.connect(self._on_top_n_clicked)
+        company_btn_layout.addWidget(self.top_n_btn)
+
+        self.browse_companies_btn = QPushButton("🔍 Browse Companies")
+        self.browse_companies_btn.setToolTip("Browse and select from all listed companies")
+        self.browse_companies_btn.clicked.connect(self._on_browse_companies)
+        company_btn_layout.addWidget(self.browse_companies_btn)
+
+        self.fetch_list_btn = QPushButton("⬇ Fetch Exchange List")
+        self.fetch_list_btn.setToolTip("Fetch latest list of US exchange companies")
+        self.fetch_list_btn.clicked.connect(self._on_fetch_exchange_list)
+        company_btn_layout.addWidget(self.fetch_list_btn)
+
+        company_btn_layout.addStretch()
+        symbol_layout.addLayout(company_btn_layout)
         file_layout = QHBoxLayout()
 
         self.file_check = QCheckBox("Load from file:")
@@ -92,16 +123,15 @@ class ControlPanel(QWidget):
         history_layout = QHBoxLayout()
         history_layout.addWidget(QLabel("History Years:"))
 
-        self.history_years_spin = QSpinBox()
-        self.history_years_spin.setMinimum(1)
-        self.history_years_spin.setMaximum(5)
-        self.history_years_spin.setValue(2)
-        self.history_years_spin.setSuffix(" years")
-        history_layout.addWidget(self.history_years_spin)
+        # Replace spin with combo including 'All Available'
+        self.history_years_combo = QComboBox()
+        years = [str(y) for y in range(1, 31)]
+        self.history_years_combo.addItems(years + ['All Available'])
+        self.history_years_combo.setCurrentText('2')
+        history_layout.addWidget(self.history_years_combo)
 
-        history_layout.addWidget(QLabel("(1-5 years of data)"))
+        history_layout.addWidget(QLabel("(1-30 or All Available)"))
         history_layout.addStretch()
-
         options_layout.addLayout(history_layout)
 
         # Chunk size
@@ -272,14 +302,16 @@ class ControlPanel(QWidget):
 
     def _get_settings(self) -> Dict:
         """Get current processing settings"""
+        hist_val = self.history_years_combo.currentText()
+        max_years = None if hist_val == 'All Available' else int(hist_val)
         return {
             'mode': 'incremental' if self.incremental_radio.isChecked() else 'full_rebuild',
-            'max_years': self.history_years_spin.value(),
+            'max_years': max_years,
             'chunk_days': self.chunk_size_spin.value(),
             'parallel_enabled': self.parallel_check.isChecked(),
             'max_workers': self.max_workers_spin.value() if self.parallel_check.isChecked() else 1,
-            'api_calls_per_minute': 80,  # From settings
-            'api_calls_per_day': 95000   # From settings
+            'api_calls_per_minute': 80,
+            'api_calls_per_day': 95000
         }
 
     def _start_pipeline(self):
@@ -353,3 +385,118 @@ class ControlPanel(QWidget):
         self.is_running = False
         self._update_button_states()
 
+    def _on_top_n_clicked(self):
+        """Handle top N companies quick select"""
+        n = self.top_n_spin.value()
+
+        # Use cached companies if available
+        if self.cache_store:
+            try:
+                companies = self.cache_store.get_company_list()
+                if companies:
+                    # Get top N by symbol (already sorted)
+                    top_n = companies[:n]
+                    symbols = [c.get('Code') or c.get('symbol', '') for c in top_n]
+                    symbols = [s for s in symbols if s]  # Filter empty
+
+                    self.symbol_input.setText(', '.join(symbols))
+                    QMessageBox.information(self, "Top N Selected", f"Selected top {len(symbols)} companies:\n{', '.join(symbols)}")
+                    return
+            except Exception as e:
+                import logging
+                logging.error(f"Failed to get top N from cache: {e}")
+
+        # Fallback to hardcoded if cache not available
+        top_companies = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'BRK', 'JNJ', 'V',
+                         'WMT', 'JPM', 'PG', 'MA', 'INTC', 'HD', 'PFE', 'XOM', 'NFLX', 'CRM']
+        selected = top_companies[:n]
+        self.symbol_input.setText(', '.join(selected))
+        QMessageBox.information(self, "Top N Selected", f"Selected top {len(selected)} companies:\n{', '.join(selected)}")
+
+    def _on_browse_companies(self):
+        """Open company browser dialog"""
+        try:
+            from dashboard.dialogs import CompanySelectorDialog
+
+            dialog = CompanySelectorDialog(self.cache_store, self)
+            dialog.companies_selected.connect(self._on_companies_selected)
+            dialog.exec()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open company selector:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def _on_fetch_exchange_list(self):
+        """Fetch latest exchange list from EODHD"""
+        # Show progress dialog
+        from PyQt6.QtWidgets import QProgressDialog
+        from PyQt6.QtCore import Qt
+
+        progress = QProgressDialog(
+            "Fetching exchange list from EODHD...",
+            "Cancel",
+            0, 0,
+            self
+        )
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setCancelButton(None)  # No cancel during fetch
+        progress.show()
+
+        try:
+            # Import fetcher
+            from data_fetcher import EODHDDataFetcher
+
+            fetcher = EODHDDataFetcher()
+
+            # Fetch US exchange symbols
+            progress.setLabelText("Fetching NASDAQ companies...")
+            self._refresh_ui()
+            nasdaq = fetcher.fetch_exchange_symbols('NASDAQ', skip_delisted=True)
+
+            progress.setLabelText("Fetching NYSE companies...")
+            self._refresh_ui()
+            nyse = fetcher.fetch_exchange_symbols('NYSE', skip_delisted=True)
+
+            progress.setLabelText("Fetching AMEX companies...")
+            self._refresh_ui()
+            amex = fetcher.fetch_exchange_symbols('AMEX', skip_delisted=True)
+
+            # Combine all companies
+            all_companies = nasdaq + nyse + amex
+
+            # Cache them
+            if self.cache_store:
+                self.cache_store.save_company_list(all_companies)
+
+            progress.close()
+
+            QMessageBox.information(
+                self,
+                "Companies Fetched",
+                f"Successfully fetched {len(all_companies)} companies from US exchanges:\n"
+                f"  • NASDAQ: {len(nasdaq)}\n"
+                f"  • NYSE: {len(nyse)}\n"
+                f"  • AMEX: {len(amex)}\n\n"
+                "Companies are now cached and available in Browse Companies."
+            )
+
+        except Exception as e:
+            progress.close()
+            QMessageBox.critical(self, "Error", f"Failed to fetch exchange list:\n{str(e)}")
+
+    def _refresh_ui(self):
+        """Allow UI to refresh during long operations"""
+        from PyQt6.QtCore import QCoreApplication
+        QCoreApplication.processEvents()
+
+    def _on_companies_selected(self, symbols: List[str]):
+        """Handle companies selected from dialog"""
+        self.symbol_input.setText(', '.join(symbols))
+        QMessageBox.information(self, "Companies Selected", f"Selected {len(symbols)} companies")
+
+    def reset(self):
+        """Reset control panel to initial state"""
+        self.symbol_input.clear()
+        self.is_running = False
+        self._update_button_states()

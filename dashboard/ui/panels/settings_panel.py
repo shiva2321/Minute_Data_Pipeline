@@ -252,6 +252,73 @@ class SettingsPanel(QWidget):
         ui_group.setLayout(ui_layout)
         layout.addWidget(ui_group)
 
+        # Email Configuration
+        email_group = QGroupBox("Email Alerts Configuration")
+        email_layout = QVBoxLayout()
+
+        # Enable email alerts
+        self.email_enabled_check = QCheckBox("Enable Email Alerts on Critical Errors")
+        self.email_enabled_check.setChecked(False)
+        email_layout.addWidget(self.email_enabled_check)
+
+        # SMTP Server
+        smtp_layout = QHBoxLayout()
+        smtp_layout.addWidget(QLabel("SMTP Server:"))
+        self.smtp_server_input = QLineEdit()
+        self.smtp_server_input.setPlaceholderText("smtp.gmail.com")
+        smtp_layout.addWidget(self.smtp_server_input)
+        email_layout.addLayout(smtp_layout)
+
+        # SMTP Port
+        port_layout = QHBoxLayout()
+        port_layout.addWidget(QLabel("SMTP Port:"))
+        self.smtp_port_spin = QSpinBox()
+        self.smtp_port_spin.setMinimum(1)
+        self.smtp_port_spin.setMaximum(65535)
+        self.smtp_port_spin.setValue(587)
+        port_layout.addWidget(self.smtp_port_spin)
+        port_layout.addStretch()
+        email_layout.addLayout(port_layout)
+
+        # Sender Email
+        sender_layout = QHBoxLayout()
+        sender_layout.addWidget(QLabel("Sender Email:"))
+        self.sender_email_input = QLineEdit()
+        self.sender_email_input.setPlaceholderText("your_email@gmail.com")
+        sender_layout.addWidget(self.sender_email_input)
+        email_layout.addLayout(sender_layout)
+
+        # Sender Password
+        password_layout = QHBoxLayout()
+        password_layout.addWidget(QLabel("Sender Password:"))
+        self.sender_password_input = QLineEdit()
+        self.sender_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.sender_password_input.setPlaceholderText("App password or account password")
+        password_layout.addWidget(self.sender_password_input)
+
+        show_pwd_btn = QPushButton("👁")
+        show_pwd_btn.setMaximumWidth(40)
+        show_pwd_btn.clicked.connect(self._toggle_password_visibility)
+        password_layout.addWidget(show_pwd_btn)
+
+        email_layout.addLayout(password_layout)
+
+        # Recipient Emails
+        recipient_layout = QHBoxLayout()
+        recipient_layout.addWidget(QLabel("Recipient Email(s):"))
+        self.recipient_emails_input = QLineEdit()
+        self.recipient_emails_input.setPlaceholderText("admin@example.com, ops@example.com")
+        recipient_layout.addWidget(self.recipient_emails_input)
+        email_layout.addLayout(recipient_layout)
+
+        # Test button
+        test_email_btn = QPushButton("🔧 Test Email Configuration")
+        test_email_btn.clicked.connect(self._test_email_configuration)
+        email_layout.addWidget(test_email_btn)
+
+        email_group.setLayout(email_layout)
+        layout.addWidget(email_group)
+
         # Action buttons
         button_layout = QHBoxLayout()
 
@@ -312,6 +379,14 @@ class SettingsPanel(QWidget):
         self.max_workers_spin.setValue(self.current_settings.get('max_workers', 10))
         self.store_metadata_check.setChecked(self.current_settings.get('store_metadata', True))
         self.auto_retry_check.setChecked(self.current_settings.get('auto_retry', True))
+
+        # Email settings
+        self.email_enabled_check.setChecked(self.current_settings.get('email_enabled', False))
+        self.smtp_server_input.setText(self.current_settings.get('smtp_server', 'smtp.gmail.com'))
+        self.smtp_port_spin.setValue(self.current_settings.get('smtp_port', 587))
+        self.sender_email_input.setText(self.current_settings.get('sender_email', ''))
+        self.sender_password_input.setText(self.current_settings.get('sender_password', ''))
+        self.recipient_emails_input.setText(self.current_settings.get('recipient_emails', ''))
         self.log_level_combo.setCurrentText(self.current_settings.get('log_level', 'INFO'))
         self.refresh_rate_spin.setValue(self.current_settings.get('refresh_rate', 2))
         self.notifications_check.setChecked(self.current_settings.get('notifications', False))
@@ -372,6 +447,63 @@ class SettingsPanel(QWidget):
 
             QMessageBox.critical(self, "Connection Failed", f"Failed to connect:\n{str(e)}")
 
+    def _toggle_password_visibility(self):
+        """Toggle email password visibility"""
+        if self.sender_password_input.echoMode() == QLineEdit.EchoMode.Password:
+            self.sender_password_input.setEchoMode(QLineEdit.EchoMode.Normal)
+        else:
+            self.sender_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+
+    def _test_email_configuration(self):
+        """Test email configuration"""
+        if not self.email_enabled_check.isChecked():
+            QMessageBox.warning(self, "Email Disabled", "Email alerts are disabled. Enable them first.")
+            return
+
+        # Validate inputs
+        if not self.sender_email_input.text().strip():
+            QMessageBox.warning(self, "Missing Email", "Please enter sender email address")
+            return
+
+        if not self.recipient_emails_input.text().strip():
+            QMessageBox.warning(self, "Missing Recipient", "Please enter at least one recipient email")
+            return
+
+        if not self.sender_password_input.text().strip():
+            QMessageBox.warning(self, "Missing Password", "Please enter sender password")
+            return
+
+        # Test connection
+        try:
+            from dashboard.services import LogEmailAlerter
+            import smtplib
+
+            smtp_server = self.smtp_server_input.text().strip() or "smtp.gmail.com"
+            smtp_port = self.smtp_port_spin.value()
+            sender_email = self.sender_email_input.text().strip()
+            password = self.sender_password_input.text().strip()
+
+            # Test SMTP connection
+            with smtplib.SMTP(smtp_server, smtp_port, timeout=5) as server:
+                server.starttls()
+                server.login(sender_email, password)
+
+            QMessageBox.information(
+                self,
+                "Email Test Success",
+                "Email configuration is valid!\n\n"
+                "✅ SMTP server connection successful\n"
+                "✅ Authentication successful\n\n"
+                "Email alerts will be sent on critical errors."
+            )
+
+        except smtplib.SMTPAuthenticationError:
+            QMessageBox.critical(self, "Auth Failed", "Email authentication failed.\nCheck email and password.")
+        except smtplib.SMTPException as e:
+            QMessageBox.critical(self, "SMTP Error", f"SMTP error:\n{str(e)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to test email:\n{str(e)}")
+
     def _save_settings(self):
         """Save current settings"""
         # Gather settings
@@ -392,7 +524,14 @@ class SettingsPanel(QWidget):
             'log_level': self.log_level_combo.currentText(),
             'refresh_rate': self.refresh_rate_spin.value(),
             'notifications': self.notifications_check.isChecked(),
-            'minimize_tray': self.minimize_tray_check.isChecked()
+            'minimize_tray': self.minimize_tray_check.isChecked(),
+            # Email settings
+            'email_enabled': self.email_enabled_check.isChecked(),
+            'smtp_server': self.smtp_server_input.text().strip(),
+            'smtp_port': self.smtp_port_spin.value(),
+            'sender_email': self.sender_email_input.text().strip(),
+            'sender_password': self.sender_password_input.text().strip(),
+            'recipient_emails': self.recipient_emails_input.text().strip()
         }
 
         try:
@@ -421,3 +560,13 @@ class SettingsPanel(QWidget):
             self.current_settings = self._load_settings()
             self._populate_from_settings()
 
+    def get_email_settings(self) -> dict:
+        """Return current email alert configuration."""
+        return {
+            'email_enabled': self.email_enabled_check.isChecked(),
+            'smtp_server': self.smtp_server_input.text().strip(),
+            'smtp_port': self.smtp_port_spin.value(),
+            'sender_email': self.sender_email_input.text().strip(),
+            'sender_password': self.sender_password_input.text().strip(),
+            'recipient_emails': self.recipient_emails_input.text().strip()
+        }

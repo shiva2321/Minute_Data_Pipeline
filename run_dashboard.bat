@@ -45,12 +45,17 @@ echo Launching dashboard...
 echo.
 
 python dashboard\main.py
+set EXITCODE=%ERRORLEVEL%
 
-REM Keep window open if there was an error
-if errorlevel 1 (
+if %EXITCODE% NEQ 0 (
     echo.
-    echo Error: Dashboard exited with error code %errorlevel%
+    echo Error: Dashboard exited with error code %EXITCODE%
     echo.
     pause
+) else (
+    echo.
+    echo Dashboard closed normally.
+    echo.
 )
 
+exit /b %EXITCODE%

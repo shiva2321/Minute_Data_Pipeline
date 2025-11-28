@@ -14,6 +14,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 from dashboard.ui.main_window import MainWindow
 from dashboard.utils.theme import load_stylesheet
+from dashboard.models import CacheStore
 import logging
 
 # Suppress Qt warnings for cleaner output
@@ -36,8 +37,12 @@ def main():
     # Apply dark theme
     app.setStyleSheet(load_stylesheet())
 
+    # Initialize cache store for persistence
+    cache_store = CacheStore()
+    logging.info("Cache store initialized at ~/.pipeline_cache.db")
+
     # Create and show main window
-    window = MainWindow()
+    window = MainWindow(cache_store=cache_store)
     window.show()
 
     # Configure logging

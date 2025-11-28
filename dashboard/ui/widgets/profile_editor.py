@@ -33,6 +33,13 @@ class ProfileEditor(QDialog):
         self.setWindowTitle(f"Profile Editor: {symbol}")
         self.setMinimumSize(900, 700)
 
+        # Remap legacy or missing keys to available sections
+        self._feature_key_map = {
+            'price_features': ['statistical_features','performance_metrics'],
+            'volume_features': ['microstructure_features'],
+            'volatility_features': ['risk_metrics','performance_metrics']
+        }
+
         self.init_ui()
 
     def init_ui(self):
@@ -167,7 +174,14 @@ class ProfileEditor(QDialog):
         content_layout = QGridLayout()
 
         # Get features
-        features = self.current_profile.get(feature_key, {})
+        raw_features = self.current_profile.get(feature_key, {})
+        if not raw_features and feature_key in self._feature_key_map:
+            merged = {}
+            for alt_key in self._feature_key_map[feature_key]:
+                merged.update(self.current_profile.get(alt_key, {}) or {})
+            features = merged
+        else:
+            features = raw_features
 
         if features:
             row = 0
@@ -317,4 +331,3 @@ class ProfileEditor(QDialog):
 
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", f"Failed to export profile:\n{str(e)}")
-

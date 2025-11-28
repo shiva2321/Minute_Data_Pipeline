@@ -99,6 +99,9 @@ class ProfileBrowser(QWidget):
 
         layout.addWidget(self.table)
 
+        # Connect table double-click
+        self.table.doubleClicked.connect(self._on_table_double_click)
+
         # Action buttons
         button_layout = QHBoxLayout()
 
@@ -400,3 +403,6 @@ class ProfileBrowser(QWidget):
         self.db_controller.update_profile(symbol, profile)
         self._refresh_profiles()
 
+    def _on_table_double_click(self, index):
+        """Handle double-click on table row"""
+        self._view_profile()
