@@ -10,6 +10,7 @@ PyQt6-Charts>=6.6.0
 # API and Data Fetching
 requests>=2.31.0
 python-dotenv>=1.0.0
+yfinance>=0.2.32  # Fallback for company establishment dates
 
 # Data Processing
 pandas>=2.1.0

@@ -389,29 +389,34 @@ class ControlPanel(QWidget):
         """Handle top N companies quick select"""
         n = self.top_n_spin.value()
 
-        # Use cached companies if available
-        if self.cache_store:
-            try:
-                companies = self.cache_store.get_company_list()
-                if companies:
-                    # Get top N by symbol (already sorted)
-                    top_n = companies[:n]
-                    symbols = [c.get('Code') or c.get('symbol', '') for c in top_n]
-                    symbols = [s for s in symbols if s]  # Filter empty
+        # Top companies by market cap (2024-2025 data)
+        # These are the actual largest US companies by market capitalization
+        top_companies_by_market_cap = [
+            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.B', 'TSM', 'LLY',
+            'V', 'UNH', 'XOM', 'WMT', 'JPM', 'MA', 'JNJ', 'PG', 'AVGO', 'HD',
+            'ORCL', 'CVX', 'COST', 'MRK', 'ABBV', 'KO', 'BAC', 'CRM', 'NFLX', 'PEP',
+            'AMD', 'TMO', 'ADBE', 'MCD', 'CSCO', 'ACN', 'LIN', 'ABT', 'NKE', 'TXN',
+            'INTC', 'WFC', 'DHR', 'PM', 'VZ', 'DIS', 'CMCSA', 'QCOM', 'AMGN', 'NEE',
+            'UNP', 'RTX', 'SPGI', 'HON', 'INTU', 'UPS', 'LOW', 'COP', 'BMY', 'BA',
+            'AMAT', 'T', 'ELV', 'SBUX', 'DE', 'GE', 'BLK', 'ISRG', 'MDT', 'GILD',
+            'AXP', 'PLD', 'TJX', 'BKNG', 'ADI', 'MDLZ', 'SYK', 'AMT', 'VRTX', 'CI',
+            'SCHW', 'MO', 'LRCX', 'CVS', 'C', 'PGR', 'CB', 'ZTS', 'REGN', 'BSX',
+            'SO', 'MMC', 'NOC', 'DUK', 'PYPL', 'BDX', 'EQIX', 'ETN', 'FI', 'MU'
+        ]
 
-                    self.symbol_input.setText(', '.join(symbols))
-                    QMessageBox.information(self, "Top N Selected", f"Selected top {len(symbols)} companies:\n{', '.join(symbols)}")
-                    return
-            except Exception as e:
-                import logging
-                logging.error(f"Failed to get top N from cache: {e}")
+        # Select top N from the list
+        selected = top_companies_by_market_cap[:min(n, len(top_companies_by_market_cap))]
 
-        # Fallback to hardcoded if cache not available
-        top_companies = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'BRK', 'JNJ', 'V',
-                         'WMT', 'JPM', 'PG', 'MA', 'INTC', 'HD', 'PFE', 'XOM', 'NFLX', 'CRM']
-        selected = top_companies[:n]
+        # Set in symbol input field
         self.symbol_input.setText(', '.join(selected))
-        QMessageBox.information(self, "Top N Selected", f"Selected top {len(selected)} companies:\n{', '.join(selected)}")
+
+        # Show confirmation message
+        QMessageBox.information(
+            self,
+            "Top N Companies Selected",
+            f"Selected top {len(selected)} US companies by market cap:\n\n{', '.join(selected[:10])}"
+            + (f"\n... and {len(selected) - 10} more" if len(selected) > 10 else "")
+        )
 
     def _on_browse_companies(self):
         """Open company browser dialog"""

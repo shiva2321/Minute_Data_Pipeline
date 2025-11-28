@@ -291,6 +291,7 @@ class PipelineController(QThread):
             else:
                 self.signals.log_message.emit('INFO', f'{symbol}: Creating new profile')
                 max_years = config.get('max_years', 2)
+                # max_years can be None when "All Available" is selected - this is handled in _full_backfill
                 profile = self._full_backfill(pipeline, symbol, max_years, progress_callback)
 
             # Get final API stats
@@ -324,7 +325,7 @@ class PipelineController(QThread):
         Args:
             pipeline: MinuteDataPipeline instance
             symbol: Ticker symbol
-            max_years: Number of years to fetch
+            max_years: Number of years to fetch (None means all available since establishment)
             progress_callback: Callback for progress updates
 
         Returns:
@@ -337,6 +338,90 @@ class PipelineController(QThread):
 
         # Calculate date range
         end_date = datetime.now()
+
+        # Handle None for max_years (All Available) - fetch from establishment date
+        if max_years is None:
+            self.signals.log_message.emit('INFO', f'{symbol}: Fetching establishment date for all available data')
+            progress_callback('Initializing', 5, micro_stage='Fetching company info')
+
+            ipo_date = None
+            date_source = None
+
+            try:
+                # OPTION 1: Try EODHD fundamental data first
+                self.signals.log_message.emit('INFO', f'{symbol}: Attempting to fetch IPO date from EODHD...')
+                fundamental_data = pipeline.data_fetcher.fetch_fundamental_data(symbol, exchange='US')
+
+                # Try to extract IPO date or founding date
+                ipo_date = None
+
+                # Check General section for IPO date
+                if fundamental_data.get('General', {}).get('IPODate'):
+                    ipo_date_str = fundamental_data['General']['IPODate']
+                    try:
+                        ipo_date = datetime.strptime(ipo_date_str, '%Y-%m-%d')
+                        date_source = 'EODHD IPO date'
+                        self.signals.log_message.emit('SUCCESS', f'{symbol}: ✓ Found IPO date from EODHD: {ipo_date_str}')
+                    except:
+                        pass
+
+                # If no IPO date, check for founding date or other date fields
+                if not ipo_date and fundamental_data.get('General', {}).get('FoundingDate'):
+                    founding_date_str = fundamental_data['General']['FoundingDate']
+                    try:
+                        ipo_date = datetime.strptime(founding_date_str, '%Y-%m-%d')
+                        date_source = 'EODHD founding date'
+                        self.signals.log_message.emit('SUCCESS', f'{symbol}: ✓ Found founding date from EODHD: {founding_date_str}')
+                    except:
+                        pass
+
+            except Exception as e:
+                self.signals.log_message.emit('WARNING', f'{symbol}: EODHD fundamental data unavailable: {str(e)}')
+
+            # OPTION 2: Try yfinance as fallback if EODHD didn't work
+            if not ipo_date:
+                try:
+                    import yfinance as yf
+                    self.signals.log_message.emit('INFO', f'{symbol}: Attempting to fetch IPO date from yfinance (fallback)...')
+
+                    ticker = yf.Ticker(symbol)
+                    info = ticker.info
+
+                    # Try to get firstTradeDateEpochUtc (most reliable for IPO date)
+                    if info.get('firstTradeDateEpochUtc'):
+                        ipo_timestamp = info['firstTradeDateEpochUtc']
+                        ipo_date = datetime.fromtimestamp(ipo_timestamp)
+                        date_source = 'yfinance first trade date'
+                        self.signals.log_message.emit('SUCCESS', f'{symbol}: ✓ Found first trade date from yfinance: {ipo_date.strftime("%Y-%m-%d")}')
+
+                    # Fallback to ipoDate field if available
+                    elif info.get('ipoDate'):
+                        ipo_date_str = info['ipoDate']
+                        try:
+                            ipo_date = datetime.strptime(ipo_date_str, '%Y-%m-%d')
+                            date_source = 'yfinance IPO date'
+                            self.signals.log_message.emit('SUCCESS', f'{symbol}: ✓ Found IPO date from yfinance: {ipo_date_str}')
+                        except:
+                            pass
+
+                except ImportError:
+                    self.signals.log_message.emit('WARNING', f'{symbol}: yfinance not installed, skipping fallback')
+                except Exception as e:
+                    self.signals.log_message.emit('WARNING', f'{symbol}: yfinance fallback failed: {str(e)}')
+
+            # Calculate years or use default
+            if ipo_date:
+                # Calculate years since establishment
+                years_since_establishment = (end_date - ipo_date).days / 365.25
+                max_years = max(1, int(years_since_establishment))  # At least 1 year
+                self.signals.log_message.emit('INFO', f'{symbol}: ✓ OPTION SELECTED: Using {max_years} years of history from {date_source} (since {ipo_date.strftime("%Y-%m-%d")})')
+                progress_callback('Initializing', 8, micro_stage=f'Using {max_years}yr from {ipo_date.year}')
+            else:
+                # OPTION 3: Default to 10 years
+                max_years = 10
+                self.signals.log_message.emit('WARNING', f'{symbol}: ✗ OPTION SELECTED: No establishment date found from EODHD or yfinance, using {max_years} years as DEFAULT')
+                progress_callback('Initializing', 8, micro_stage=f'Default {max_years}yr (no IPO date)')
+
         start_date = end_date - timedelta(days=365 * max_years)
 
         # Estimate number of batches (30-day chunks)
