@@ -181,10 +181,3 @@ Logs: `logs/pipeline_YYYY-MM-DD.log`
 ---
 ## 📄 License
 MIT (see future LICENSE file if added). Use freely with attribution; contributions welcome.
-
----
-## ⚠️ Security Note
-Never commit real API keys. Keep secrets in `.env` (ignored). Use `.env.example` as template for sharing configuration structure.
-
----
-**Enjoy high‑speed minute data processing & exploration.** For deep dives start with: `docs/QUICK_REF.md` → `docs/GETTING_STARTED.md` → dashboard usage.
