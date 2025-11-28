@@ -1,336 +1,190 @@
 # Minute Data Pipeline
 
-A comprehensive data pipeline for fetching, processing, and analyzing historical minute-by-minute stock data from EODHD API, with advanced feature engineering and MongoDB storage.
-
-## 🆕 Desktop Dashboard Available!
-
-**NEW**: Professional PyQt6 desktop application for pipeline control and monitoring!
-
-```bash
-# Launch the desktop dashboard
-run_dashboard.bat
-```
-
-Features:
-- ✅ **Parallel Processing**: Process 10+ symbols simultaneously
-- ✅ **Real-time Monitoring**: Live progress, logs, and API usage
-- ✅ **Profile Management**: Browse, edit, and export profiles
-- ✅ **Smart Rate Limiting**: Shared limiter across all workers
-- ✅ **Professional UI**: Dark theme, responsive, never freezes
-
-📖 **Documentation**:
-- **[QUICK_REF.md](QUICK_REF.md)** - Quick reference (START HERE!)
-- **[DASHBOARD_GUIDE.md](DASHBOARD_GUIDE.md)** - Complete walkthrough
-- **[README_DASHBOARD.md](README_DASHBOARD.md)** - Technical documentation
-- **[INDEX.md](INDEX.md)** - File navigation guide
+A production-ready Python platform for fetching, engineering, storing, and exploring historical minute‑level equity data from the EODHD API. Includes:
+- High‑performance feature engineering (technical, statistical, microstructure, regime, predictive labels)
+- MongoDB persistence with indexing & profile lifecycle operations
+- Adaptive rate limiting & chunked historical backfill (30‑day efficiency strategy)
+- A PyQt6 Desktop Dashboard for orchestration, monitoring, editing profiles, and settings management
+- Extensive documentation & release notes under `docs/`
 
 ---
+## ✅ Highlights
+| Area | What You Get |
+|------|--------------|
+| Data Ingestion | Minute history (multi-year), fundamentals, configurable intervals |
+| Feature Engineering | 200+ derived indicators & metrics across technical/statistical/regime/labels |
+| Storage | Structured company profiles in MongoDB with indexes & metadata |
+| Desktop Dashboard | Parallel processing, live metrics, logs, API usage gauges, profile browser/editor |
+| Reliability | Auto-reconnect MongoDB, exception handling, safe JSON editing, configurable rate limits |
+| Performance | 30‑day chunk fetch (≈6× fewer API calls), multi-thread parallel symbol workers |
+| Documentation | Quick reference, guides, architectural overview, release/fix notes |
 
-## Features
-
-### 📊 Data Fetching
-- Historical minute-by-minute data from EODHD API
-- Support for multiple time intervals (1m, 5m, 1h)
-- Fundamental company data integration
-- Rate-limited API calls
-- Batch processing for multiple symbols
-
-### 🔬 Feature Engineering
-- **Technical Indicators**: 
-  - Moving Averages (SMA, EMA)
-  - Bollinger Bands
-  - RSI (Relative Strength Index)
-  - MACD
-  - ATR (Average True Range)
-  - Stochastic Oscillator
-  - Volume indicators
-
-- **Statistical Features**:
-  - Price statistics (mean, median, std, variance)
-  - Return statistics
-  - Skewness and Kurtosis
-  - Sharpe Ratio
-  - Volatility measures
-  - Trend analysis
-
-- **ML Features**:
-  - Lagged features
-  - Rolling statistics
-  - Price position indicators
-  - Candlestick patterns
-  - Volume dynamics
-
-- **Market Microstructure**:
-  - Spread measures
-  - Price impact
-  - Liquidity indicators
-  - Order flow imbalance
-
-- **Risk Metrics**:
-  - Value at Risk (VaR)
-  - Conditional VaR (CVaR)
-  - Maximum Drawdown
-  - Volatility metrics
-
-### 💾 Storage
-- MongoDB integration for persistent storage
-- Comprehensive company profiles
-- Indexed for efficient querying
-- Support for updates and retrieval
-
-## Installation
-
-1. **Clone the repository**:
-```bash
-cd "D:\development project\Minute_Data_Pipeline"
-```
-
-2. **Create and activate virtual environment**:
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-3. **Install dependencies**:
-```powershell
-pip install -r requirements.txt
-```
-
-4. **Set up environment variables**:
-```powershell
-Copy-Item .env.example .env
-```
-
-Edit `.env` file and add your credentials:
-```
-EODHD_API_KEY=your_api_key_here
-MONGODB_URI=mongodb://localhost:27017/
-```
-
-## Quick Start
-
-### Basic Usage
-
-```python
-from pipeline import MinuteDataPipeline
-
-# Initialize pipeline
-pipeline = MinuteDataPipeline()
-
-# Process a single symbol
-pipeline.process_symbol(
-    symbol='AAPL',
-    exchange='US',
-    interval='1m',
-    from_date='2024-11-01',
-    to_date='2024-11-27',
-    fetch_fundamentals=True
-)
-
-# Retrieve the profile
-profile = pipeline.get_profile('AAPL')
-print(f"Company: {profile['company_name']}")
-print(f"Data points: {profile['data_points_count']}")
-```
-
-### Process Multiple Symbols
-
-```python
-symbols = ['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'AMZN']
-
-results = pipeline.process_multiple_symbols(
-    symbols=symbols,
-    interval='5m',
-    fetch_fundamentals=True
-)
-
-print(f"Successful: {len(results['successful'])}")
-print(f"Failed: {len(results['failed'])}")
-```
-
-### Retrieve and Analyze
-
-```python
-# Get a specific profile
-profile = pipeline.get_profile('AAPL')
-
-# Access different feature sets
-stats = profile['statistical_features']
-print(f"Average Price: ${stats['price_mean']:.2f}")
-print(f"Sharpe Ratio: {stats['sharpe_ratio']:.4f}")
-
-# Technical indicators
-tech = profile['technical_indicators']
-print(f"RSI(14): {tech['rsi_14']:.2f}")
-
-# Risk metrics
-risk = profile['risk_metrics']
-print(f"Max Drawdown: {risk['max_drawdown']:.2%}")
-```
-
-## Project Structure
-
+---
+## 📦 Repository Organization
 ```
 Minute_Data_Pipeline/
-├── config.py                 # Configuration and settings
-├── data_fetcher.py          # EODHD API data fetching
-├── feature_engineering.py   # Feature calculation and engineering
-├── mongodb_storage.py       # MongoDB storage and retrieval
-├── pipeline.py              # Main pipeline orchestrator
-├── examples.py              # Usage examples
-├── requirements.txt         # Python dependencies
-├── .env.example            # Environment variables template
-└── README.md               # This file
+├── dashboard/                # PyQt6 desktop application (UI, controllers, widgets, utils)
+├── docs/                     # Core documentation & guides
+│   ├── release_notes/        # Versioned & fix-focused markdown files
+│   ├── ARCHITECTURE.md       # High-level system design
+│   ├── API_REFERENCE.md      # Public APIs & usage
+│   ├── QUICK_REF.md          # Fast start cheat sheet
+│   ├── GETTING_STARTED.md    # Step-by-step onboarding
+│   ├── DASHBOARD_GUIDE.md    # Full dashboard walkthrough
+│   ├── README_DASHBOARD.md   # Technical dashboard internals
+│   └── ... (additional guides & summaries)
+├── feature_engineering.py    # FeatureEngineer class (full pipeline)
+├── data_fetcher.py           # EODHD data retrieval & rate limiting integration
+├── mongodb_storage.py        # MongoDBStorage class (CRUD + indexing)
+├── pipeline.py               # MinuteDataPipeline orchestrator (symbol processing)
+├── config.py                 # Pydantic settings from environment
+├── utils/                    # Shared utility modules
+├── scripts/                  # Operational scripts (backfill, benchmark, tests)
+├── tests/                    # Test suite (unit/functional)
+├── tmp/                      # Transient test outputs / generated artifacts (ignored)
+├── logs/                     # Runtime logs (rotating)
+├── requirements.txt          # Python dependencies
+├── VERSION                   # Current semantic version
+├── CHANGELOG.md              # Aggregated release notes
+└── README.md                 # This overview
 ```
-
-## Configuration
-
-The pipeline uses environment variables for configuration:
-
-- `EODHD_API_KEY`: Your EODHD API key (required)
-- `EODHD_BASE_URL`: EODHD API base URL (default: https://eodhd.com/api)
-- `MONGODB_URI`: MongoDB connection URI (default: mongodb://localhost:27017/)
-- `MONGODB_DATABASE`: Database name (default: stock_data)
-- `MONGODB_COLLECTION`: Collection name (default: company_profiles)
-- `DATA_FETCH_INTERVAL_DAYS`: Default data fetch interval (default: 30)
-- `MAX_WORKERS`: Maximum concurrent workers (default: 5)
-
-## Company Profile Structure
-
-Each company profile stored in MongoDB contains:
-
-```json
-{
-  "symbol": "AAPL",
-  "exchange": "US",
-  "company_name": "Apple Inc.",
-  "sector": "Technology",
-  "industry": "Consumer Electronics",
-  "last_updated": "2024-11-27T...",
-  
-  "data_summary": {
-    "total_records": 15000,
-    "date_range": {...}
-  },
-  
-  "statistical_features": {
-    "price_mean": 185.50,
-    "returns_std": 0.015,
-    "sharpe_ratio": 1.85,
-    ...
-  },
-  
-  "technical_indicators": {
-    "sma_50": 182.30,
-    "rsi_14": 65.5,
-    "macd": 2.35,
-    ...
-  },
-  
-  "risk_metrics": {
-    "max_drawdown": -0.15,
-    "var_95": -0.025,
-    ...
-  },
-  
-  "performance_metrics": {...},
-  "time_based_features": {...},
-  "microstructure_features": {...},
-  "fundamental_data": {...}
-}
-```
-
-## Examples
-
-See `examples.py` for detailed usage examples:
-
-1. **Single Symbol Processing**: Process one stock with full features
-2. **Multiple Symbols**: Batch process multiple stocks
-3. **Retrieve and Analyze**: Query and analyze stored profiles
-4. **Custom Date Range**: Process specific date ranges
-5. **Export Profile**: Export profiles to JSON
-6. **Pipeline Statistics**: Get overall pipeline statistics
-
-## API Rate Limits
-
-The pipeline includes built-in rate limiting to respect EODHD API limits:
-- Configurable delay between requests
-- Session management for efficient connections
-- Error handling and retry logic
-
-## Logging
-
-The pipeline uses `loguru` for comprehensive logging:
-- Console output with colored formatting
-- Daily rotating log files in `logs/` directory
-- Different log levels (INFO, DEBUG, WARNING, ERROR)
-
-## Requirements
-
-- Python 3.8+
-- EODHD API account and API key
-- MongoDB instance (local or Atlas)
-- See `requirements.txt` for Python package dependencies
-
-## MongoDB Setup
-
-### Local MongoDB:
-```powershell
-# Install MongoDB and start the service
-# Default connection: mongodb://localhost:27017/
-```
-
-### MongoDB Atlas (Cloud):
-```
-# Use connection string from Atlas dashboard
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/
-```
-
-## Error Handling
-
-The pipeline includes comprehensive error handling:
-- API connection errors
-- Data validation
-- MongoDB connection issues
-- Missing or invalid data
-- Rate limiting
-
-## Performance
-
-- Efficient batch processing
-- Vectorized operations with pandas/numpy
-- Indexed MongoDB queries
-- Session pooling for API requests
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues or pull requests.
-
-## License
-
-MIT License
-
-## Support
-
-For issues or questions:
-1. Check the examples in `examples.py`
-2. Review the configuration in `.env`
-3. Check logs in `logs/` directory
-4. Verify MongoDB connection
-5. Confirm EODHD API key is valid
-
-## Roadmap
-
-- [ ] Add real-time data streaming
-- [ ] Implement more ML features
-- [ ] Add backtesting capabilities
-- [ ] Create visualization dashboard
-- [ ] Add more exchanges support
-- [ ] Implement data quality checks
-- [ ] Add scheduling/automation
-- [ ] Create REST API wrapper
 
 ---
+## 🚀 Quick Start
+### 1. Clone & Environment
+```powershell
+# From desired parent directory
+git clone https://github.com/shiva2321/Minute_Data_Pipeline.git
+cd Minute_Data_Pipeline
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item .env.example .env  # then edit .env with your API key & MongoDB URI
+```
+Minimum required in `.env`:
+```
+EODHD_API_KEY=your_key_here
+MONGODB_URI=mongodb://localhost:27017/
+```
+Optional overrides (defaults in `config.py`):
+```
+MONGODB_DATABASE=stock_data
+MONGODB_COLLECTION=company_profiles
+HISTORY_CHUNK_DAYS=30
+API_CALLS_PER_MINUTE=80
+API_CALLS_PER_DAY=95000
+MAX_WORKERS=10
+```
 
-**Note**: Remember to never commit your `.env` file with real API keys. Always use `.env.example` as a template.
+### 2. Run Desktop Dashboard
+```powershell
+# Launch dashboard (creates window)
+run_dashboard.bat
+```
+Or directly:
+```powershell
+.\.venv\Scripts\python.exe dashboard\main.py
+```
 
+### 3. Programmatic Pipeline Usage
+```python
+from pipeline import MinuteDataPipeline
+pipeline = MinuteDataPipeline()
+# Full symbol processing (historical + features + storage)
+pipeline.process_symbol(symbol='AAPL', exchange='US', interval='1m', from_date=None, to_date=None)
+```
+
+### 4. Tests
+```powershell
+pip install -r requirements.txt
+python -m pytest -q tests
+```
+
+---
+## 🖥 Dashboard Feature Summary
+- Parallel symbol processing (independent rate limiters per worker)
+- Live status table (queued, processing, success, failed) with progress updates
+- API usage gauges (minute/day consumption with color thresholds)
+- Log viewer (INFO/WARN/ERROR/SUCCESS color-coded, auto-scroll)
+- Profile Browser (search, sort, view, edit, delete, export JSON)
+- Profile Editor (overview + grouped feature tabs + raw JSON validation)
+- Settings Panel (API keys, MongoDB connectivity test, pipeline defaults, UI theme)
+- Automatic ETA calculation & 10s metrics refresh cadence
+
+---
+## 🧠 Feature Engineering Coverage (High-Level)
+- Technical: SMA/EMA (multi window), Bollinger metrics, RSI, MACD, ATR, Stochastic, momentum, ROC
+- Statistical: Price & return distributions, skewness, kurtosis, volatility clusters, ratios
+- Microstructure: Volume patterns, liquidity proxies, imbalance, spread-derived metrics
+- Time-Based: Session segmentation, rolling time-of-day behaviors
+- Regime: Volatility/trend/liquidity regime signals
+- Predictive Labels: Forward returns (multi-horizon), breakout classification, realized vol targets
+- Quality: Missing/duplicate counts, completeness ratios
+
+---
+## 📄 Key Documentation (All under `docs/`)
+| Guide | Path |
+|-------|------|
+| Quick Reference | `docs/QUICK_REF.md` |
+| Getting Started | `docs/GETTING_STARTED.md` |
+| Dashboard User Guide | `docs/DASHBOARD_GUIDE.md` |
+| Dashboard Internals | `docs/README_DASHBOARD.md` |
+| Architecture | `docs/ARCHITECTURE.md` |
+| API Reference | `docs/API_REFERENCE.md` |
+| Release Notes (Fixes) | `docs/release_notes/` |
+| Setup & Environment | `docs/SETUP.md` |
+| Index / Navigation | `docs/INDEX.md` |
+
+---
+## 📝 Release Notes & Fix History
+Detailed fix and iteration records live in `docs/release_notes/` (e.g., `FEATURE_ENGINEERING_FIX.md`, `FINAL_CRITICAL_FIXES.md`). For consolidated version changes see `CHANGELOG.md` and semantic version in `VERSION`.
+
+---
+## ⚙️ Configuration Model
+All runtime settings resolved via `config.py` (Pydantic). Override via environment / `.env`. Review `config.py` for accepted variables & defaults.
+
+---
+## 🔐 Safety & Data Integrity
+- Defensive exception handling around profile CRUD & JSON edits
+- Datetime normalization for UI components
+- Auto-reconnect MongoDB wrapper with caching to reduce query load
+- Rate limiter safeguards (minute/day quotas & backoff)
+
+---
+## 🧪 Testing Strategy
+Current tests (see `tests/`):
+- Feature engineering calculations
+- Rate limiter behavior
+- Dashboard import & structural integrity
+Future improvements (PRs welcome): deeper integration tests (pipeline end-to-end), performance benchmarks, mock API latency harness.
+
+---
+## 🤝 Contributing
+1. Fork & branch: `feat/your-feature` or `fix/issue-id`
+2. Add/adjust tests where behavior changes
+3. Run `pytest` locally before PR
+4. Update `CHANGELOG.md` & docs if appropriate
+
+Planned enhancements in roadmap (see `docs/PROJECT_SUMMARY.md` or release notes): streaming ingestion, scheduling, advanced ML labeling, visualization layer, cross-exchange expansion.
+
+---
+## 📬 Support & Troubleshooting
+| Symptom | Check |
+|---------|-------|
+| Empty profiles | MongoDB URI & collection names; logs/ for exceptions |
+| Slow fetch | Confirm chunk size = 30 days; rate limits not saturated |
+| API errors | Validate `EODHD_API_KEY` and daily quota usage |
+| Dashboard UI freeze | Ensure workers <= physical/logical cores (≤10 recommended here) |
+
+Logs: `logs/pipeline_YYYY-MM-DD.log`
+
+---
+## 📄 License
+MIT (see future LICENSE file if added). Use freely with attribution; contributions welcome.
+
+---
+## ⚠️ Security Note
+Never commit real API keys. Keep secrets in `.env` (ignored). Use `.env.example` as template for sharing configuration structure.
+
+---
+**Enjoy high‑speed minute data processing & exploration.** For deep dives start with: `docs/QUICK_REF.md` → `docs/GETTING_STARTED.md` → dashboard usage.
