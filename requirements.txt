@@ -1,0 +1,42 @@
+pyqt6-sip
+streamlit
+pydantic-settings
+
+# Desktop UI Framework
+PyQt6>=6.6.0
+PyQt6-WebEngine>=6.6.0
+PyQt6-Charts>=6.6.0
+
+# API and Data Fetching
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Data Processing
+pandas>=2.1.0
+numpy>=1.24.0
+
+# Statistical Analysis
+scipy>=1.11.0
+statsmodels>=0.14.0
+
+# Machine Learning Features
+scikit-learn>=1.3.0
+ta>=0.11.0  # Technical Analysis library
+pandas-ta>=0.3.14b  # Alternative technical analysis
+
+# Database
+pymongo>=4.5.0
+dnspython>=2.4.0  # For MongoDB Atlas support
+
+# Utilities
+pydantic>=2.4.0
+loguru>=0.7.0
+tqdm>=4.66.0
+
+# Date/Time
+python-dateutil>=2.8.2
+pytz>=2023.3
+
+# JSON Syntax Highlighting
+Pygments>=2.17.0
+
