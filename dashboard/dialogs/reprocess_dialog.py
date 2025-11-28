@@ -216,4 +216,3 @@ class ReprocessDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             self.reprocess_requested.emit(settings)
             self.accept()
-

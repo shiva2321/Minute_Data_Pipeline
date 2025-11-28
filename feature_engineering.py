@@ -514,7 +514,10 @@ class FeatureEngineer:
         for h in horizons:
             if len(returns) > h:
                 fr = (df['close'].shift(-h) - df['close']) / df['close']
-                labels[f'forward_return_{h}'] = float(fr.iloc[-h]) if len(fr.dropna())>h else float(fr.iloc[0])
+                # Use valid index (not shifted past data), fill NaN with 0
+                idx = min(h, len(fr) - 1)
+                val = fr.iloc[idx]
+                labels[f'forward_return_{h}'] = float(val) if not pd.isna(val) else 0.0
         # Classification labels (next interval up/down > threshold)
         threshold = 0.001
         if len(returns) > 2:
@@ -599,7 +602,10 @@ class FeatureEngineer:
         for h in horizons:
             if len(returns) > h:
                 fr = (df['close'].shift(-h) - df['close']) / df['close']
-                labels[f'forward_return_{h}'] = float(fr.iloc[-h]) if len(fr.dropna())>h else float(fr.iloc[0])
+                # Use valid index (not shifted past data), fill NaN with 0
+                idx = min(h, len(fr) - 1)
+                val = fr.iloc[idx]
+                labels[f'forward_return_{h}'] = float(val) if not pd.isna(val) else 0.0
         # Classification labels (next interval up/down > threshold)
         threshold = 0.001
         if len(returns) > 2:

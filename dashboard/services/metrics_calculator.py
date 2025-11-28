@@ -198,4 +198,3 @@ class APIStatsTracker:
             'daily_percent': int((self.daily_calls / daily_limit) * 100) if daily_limit > 0 else 0,
             'total_calls': self.total_calls
         }
-
