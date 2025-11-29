@@ -73,15 +73,16 @@ class SymbolQueueTable(QWidget):
         header.resizeSection(1, 100)  # Status
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(2, 70)   # Progress
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Micro-Stage
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(3, 200)  # Micro-Stage (fixed, not stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        header.resizeSection(4, 75)   # Data Points
+        header.resizeSection(4, 85)   # Data Points
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        header.resizeSection(5, 110)  # Date Range
+        header.resizeSection(5, 200)  # Date Range (wider for full display)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(6, 75)   # API Calls
         header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        header.resizeSection(7, 75)   # Duration
+        header.resizeSection(7, 85)   # Duration
 
         # Context menu
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -142,9 +143,12 @@ class SymbolQueueTable(QWidget):
         progress_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.table.setItem(row, 2, progress_item)
 
-        # Micro-stage (NEW COLUMN)
+        # Micro-stage (NEW COLUMN) - truncate if too long
         micro_stage = kwargs.get('micro_stage', '-')
-        micro_stage_item = QTableWidgetItem(str(micro_stage))
+        micro_stage_str = str(micro_stage)
+        if len(micro_stage_str) > 40:
+            micro_stage_str = micro_stage_str[:37] + '...'
+        micro_stage_item = QTableWidgetItem(micro_stage_str)
         micro_stage_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.table.setItem(row, 3, micro_stage_item)
 
@@ -155,9 +159,43 @@ class SymbolQueueTable(QWidget):
         data_points_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.table.setItem(row, 4, data_points_item)
 
-        # Date range
+        # Date range - format compactly
         date_range = kwargs.get('date_range', '-')
+        if date_range != '-' and '→' in str(date_range):
+            # Parse and compact: "2023-11-29 00:00:00 → 2025-11-18 00:00:00" -> "Nov 29 → Nov 18"
+            try:
+                parts = str(date_range).split(' → ')
+                if len(parts) == 2:
+                    from datetime import datetime
+                    start_str = parts[0].strip()
+                    end_str = parts[1].strip()
+
+                    # Try parsing with and without time component
+                    start = None
+                    end = None
+
+                    # Try full format with time first
+                    for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                        try:
+                            start = datetime.strptime(start_str, fmt)
+                            break
+                        except ValueError:
+                            continue
+
+                    for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                        try:
+                            end = datetime.strptime(end_str, fmt)
+                            break
+                        except ValueError:
+                            continue
+
+                    if start and end:
+                        date_range = f"{start.strftime('%b %d')} → {end.strftime('%b %d')}"
+            except Exception:
+                pass  # Keep original format if parsing fails
+
         date_range_item = QTableWidgetItem(str(date_range))
+        date_range_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.table.setItem(row, 5, date_range_item)
 
         # API calls

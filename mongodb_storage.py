@@ -389,6 +389,100 @@ class MongoDBStorage:
             logger.error(f"Error retrieving profiles by sector: {e}")
             return []
 
+    def save_ml_profile(self, ml_profile: Dict) -> bool:
+        """
+        Save ML model profile to MongoDB
+
+        Args:
+            ml_profile: ML profile dictionary
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            ml_collection = self.db['ml_profiles']
+            ml_collection.create_index([('symbol', ASCENDING)], unique=True)
+
+            result = ml_collection.update_one(
+                {'symbol': ml_profile['symbol']},
+                {'$set': ml_profile},
+                upsert=True
+            )
+            logger.info(f"Saved ML profile for {ml_profile['symbol']}")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving ML profile for {ml_profile['symbol']}: {e}")
+            return False
+
+    def save_statistical_profile(self, stat_profile: Dict) -> bool:
+        """
+        Save statistical profile to MongoDB
+
+        Args:
+            stat_profile: Statistical profile dictionary
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            stat_collection = self.db['statistical_profiles']
+            stat_collection.create_index([('symbol', ASCENDING)], unique=True)
+
+            result = stat_collection.update_one(
+                {'symbol': stat_profile['symbol']},
+                {'$set': stat_profile},
+                upsert=True
+            )
+            logger.info(f"Saved statistical profile for {stat_profile['symbol']}")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving statistical profile for {stat_profile['symbol']}: {e}")
+            return False
+
+    def get_ml_profile(self, symbol: str) -> Optional[Dict]:
+        """
+        Retrieve ML profile for a symbol
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            ML profile or None if not found
+        """
+        try:
+            ml_collection = self.db['ml_profiles']
+            profile = ml_collection.find_one({'symbol': symbol})
+            if profile:
+                logger.info(f"Retrieved ML profile for {symbol}")
+            else:
+                logger.warning(f"ML profile not found for {symbol}")
+            return profile
+        except Exception as e:
+            logger.error(f"Error retrieving ML profile for {symbol}: {e}")
+            return None
+
+    def get_statistical_profile(self, symbol: str) -> Optional[Dict]:
+        """
+        Retrieve statistical profile for a symbol
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            Statistical profile or None if not found
+        """
+        try:
+            stat_collection = self.db['statistical_profiles']
+            profile = stat_collection.find_one({'symbol': symbol})
+            if profile:
+                logger.info(f"Retrieved statistical profile for {symbol}")
+            else:
+                logger.warning(f"Statistical profile not found for {symbol}")
+            return profile
+        except Exception as e:
+            logger.error(f"Error retrieving statistical profile for {symbol}: {e}")
+            return None
+
     def close(self):
         """Close the MongoDB connection"""
         if hasattr(self, 'client'):

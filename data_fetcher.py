@@ -74,7 +74,7 @@ class EODHDDataFetcher:
         exchange: str = 'US'
     ) -> pd.DataFrame:
         """
-        Fetch intraday minute-by-minute data
+        Fetch intraday minute-by-minute data with caching
 
         Args:
             symbol: Stock symbol (e.g., 'AAPL')
@@ -86,11 +86,25 @@ class EODHDDataFetcher:
         Returns:
             DataFrame with OHLCV data
         """
+        # Import cache
+        from dashboard.services.data_fetch_cache import get_data_cache
+        cache = get_data_cache()
+
         if not from_date:
             from_date = (datetime.now() - timedelta(days=settings.data_fetch_interval_days)).strftime('%Y-%m-%d')
         if not to_date:
             to_date = datetime.now().strftime('%Y-%m-%d')
 
+        # Try intelligent cache lookup - NO RATE LIMIT NEEDED
+        # This will find and merge ALL cached batches covering the date range
+        cached_df = cache.get_data_for_date_range(symbol, from_date, to_date)
+        if cached_df is not None:
+            logger.info(f"✓ Loaded {len(cached_df):,} rows from {len(cached_df.index)} cached batches ({from_date} to {to_date})")
+            return cached_df
+
+        logger.info(f"No cache coverage for {symbol} ({from_date} to {to_date}), fetching from API...")
+
+        # Only apply rate limiting for API calls (not cache)
         url = f"{self.base_url}/intraday/{symbol}.{exchange}"
 
         base_params = {
@@ -108,7 +122,7 @@ class EODHDDataFetcher:
         ranged_params = {**base_params, 'from': from_ts, 'to': to_ts}
 
         def _request(params):
-            # Apply pause/stop + rate limit per request
+            # Apply rate limit ONLY for API calls
             self._throttle_before_call()
             response = self.session.get(url, params=params, timeout=30)
             self._record_after_call()
@@ -184,6 +198,13 @@ class EODHDDataFetcher:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
 
             logger.info(f"Successfully fetched {len(df)} records for {symbol}")
+
+            # Cache the fetched data
+            if not df.empty:
+                cache.set(symbol, from_date, to_date, df)
+                stats = cache.get_stats()
+                logger.info(f"Cache: {stats['entries']} entries, {stats['total_size_mb']}MB / {stats['max_size_mb']}MB")
+
             return df
 
         except requests.exceptions.RequestException as e:

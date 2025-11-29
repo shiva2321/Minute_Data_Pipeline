@@ -14,6 +14,7 @@ from dashboard.ui.panels.control_panel import ControlPanel
 from dashboard.ui.panels.monitor_panel import MonitorPanel
 from dashboard.ui.panels.profile_browser import ProfileBrowser
 from dashboard.ui.panels.settings_panel import SettingsPanel
+from dashboard.ui.widgets.cache_manager_widget import CacheManagerWidget
 from dashboard.controllers.pipeline_controller import PipelineController
 from dashboard.services.email_alert import EmailAlerter
 from typing import List, Dict, Optional
@@ -31,7 +32,7 @@ class MainWindow(QMainWindow):
         self.cache_store = cache_store
         self.pipeline_controller: Optional[PipelineController] = None
 
-        self.setWindowTitle("Stock Pipeline Control Dashboard")
+        self.setWindowTitle("Minute Data Pipeline Control Dashboard")
         self.setGeometry(100, 100, 1400, 900)
 
         self.init_ui()
@@ -55,8 +56,22 @@ class MainWindow(QMainWindow):
 
         main_tab = QWidget()
         main_layout = QVBoxLayout()
-        main_layout.addWidget(self.control_panel)
-        main_layout.addWidget(self.monitor_panel)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Use QSplitter to allow resizing between control and monitor panels
+        from PyQt6.QtWidgets import QSplitter
+        from PyQt6.QtCore import Qt
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(self.control_panel)
+        splitter.addWidget(self.monitor_panel)
+
+        # Set initial sizes: control panel 30%, monitor panel 70%
+        splitter.setSizes([300, 700])
+        splitter.setCollapsible(0, False)  # Don't allow control panel to collapse
+        splitter.setCollapsible(1, False)  # Don't allow monitor panel to collapse
+
+        main_layout.addWidget(splitter)
         main_tab.setLayout(main_layout)
 
         self.tabs.addTab(main_tab, "📊 Pipeline Control")
@@ -68,6 +83,10 @@ class MainWindow(QMainWindow):
         # Tab 3: Settings
         self.settings_panel = SettingsPanel()
         self.tabs.addTab(self.settings_panel, "⚙ Settings")
+
+        # Tab 4: Cache Manager
+        self.cache_manager = CacheManagerWidget()
+        self.tabs.addTab(self.cache_manager, "📦 Cache Manager")
 
         layout.addWidget(self.tabs)
         central_widget.setLayout(layout)

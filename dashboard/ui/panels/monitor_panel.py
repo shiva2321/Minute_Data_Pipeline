@@ -119,7 +119,7 @@ class MonitorPanel(QWidget):
         self.setLayout(layout)
 
     @pyqtSlot(str, str, int, str, int, int, float, bool)
-    def update_progress(self, symbol: str, status: str, progress: int, micro_stage: str, data_points: int, api_calls_used: int, duration_seconds: float, is_paused: bool):
+    def update_progress(self, symbol: str, status: str, progress: int, micro_stage: str, data_points: int, api_calls_used: int, duration_seconds: float, is_paused: bool, date_range: str = '-'):
         """
         Update symbol progress with extended metrics
 
@@ -155,6 +155,7 @@ class MonitorPanel(QWidget):
                 progress,
                 micro_stage=micro_stage,
                 data_points=data_points,
+                date_range=date_range,
                 api_calls=api_calls_used,
                 duration=duration_seconds,
                 is_paused=is_paused

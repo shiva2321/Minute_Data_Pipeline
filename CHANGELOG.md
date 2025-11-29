@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2025-11-28
+
+### Performance
+- **Vectorized Feature Engineering**: 5-8× speedup for statistical analysis (max drawdown, volatility calculations)
+  - Replaced Python for-loops with NumPy operations
+  - Pre-allocated arrays instead of dynamic list.append()
+  - Reduced feature engineering time from 15+ min to 2-3 min for 1.5M rows
+- **Removed Duplicate Code**: Eliminated 66 lines of duplicate method definitions
+
+### Bug Fixes (Critical)
+- **Thread-Safety**: Fixed "dictionary changed size during iteration" errors in cache operations
+  - Fixed 5 locations in `data_fetch_cache.py` (`_cleanup_expired`, `get_cached_date_ranges`, `get_covering_cache_entries`, `_check_size_limit`, `get_stats`)
+  - Implemented snapshot-based iteration to prevent race conditions during parallel processing
+  - Enables true parallel processing of 7+ symbols without crashes
+- **Datetime Parsing**: Fixed timestamp handling in profile loading
+  - Support both "YYYY-MM-DD" and "YYYY-MM-DD HH:MM:SS" formats
+  - Fixed AMZN profile incremental updates from MongoDB
+- **UI Date Display**: Fixed date range truncation in processing queue
+  - Displays as "Nov 29 → Nov 18" instead of "2023-11-29 to..."
+  - Improved micro-stage text truncation (max 40 chars)
+
+### UI Improvements
+- **Cache Manager Enhancements**:
+  - Added vertical splitter for resizable statistics/table sections (20%/80% default)
+  - Added right-click context menu for selective symbol cache deletion
+  - Better column width distribution (micro-stage: 180px, date-range: 140px)
+- **Processing Queue Table**:
+  - Fixed date range column sizing (110px → 140px)
+  - Reduced micro-stage from stretch to fixed 180px
+  - Improved readability with proper alignment
+
+### Data Management
+- **Cache Improvements**:
+  - Increased cache size: 1GB → 2GB (supports 10-15 symbols)
+  - Extended TTL: 24 hours → 30 days
+  - Smart date-range based lookup (can retrieve without re-fetching)
+- **Pipeline Controller**:
+  - Extract date-only portion from timestamps before API calls
+
+### Documentation
+- Created comprehensive `CURRENT_SESSION_CHANGES.md`
+- Moved outdated session documentation to `docs/` folder
+- Cleaned up temporary and development files
+
+### Version
+- **Semantic Version**: 1.1.1 (patch release)
+- **Focus**: Bug fixes, performance, stability
+- **Impact**: Production-ready for parallel processing
+
 ## [1.1.0] - 2025-11-28
 
 ### Added

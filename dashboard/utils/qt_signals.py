@@ -10,7 +10,7 @@ class PipelineSignals(QObject):
 
     # Symbol processing signals (extended: micro_stage, api_calls_used, duration_seconds, is_paused)
     symbol_started = pyqtSignal(str)  # symbol
-    symbol_progress = pyqtSignal(str, str, int, str, int, int, float, bool)  # symbol, status, progress%, micro_stage, data_points, api_calls_used, duration_seconds, is_paused
+    symbol_progress = pyqtSignal(str, str, int, str, int, int, float, bool, str)  # symbol, status, progress%, micro_stage, data_points, api_calls_used, duration_seconds, is_paused, date_range
     symbol_completed = pyqtSignal(str, dict)  # symbol, profile
     symbol_failed = pyqtSignal(str, str)  # symbol, error_message
     symbol_skipped = pyqtSignal(str, str)  # symbol, reason

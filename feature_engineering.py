@@ -23,9 +23,19 @@ except ImportError:  # safe fallback
 class FeatureEngineer:
     """Derives comprehensive statistical and ML features from minute data"""
 
-    def __init__(self):
-        """Initialize the feature engineer"""
+    def __init__(self, progress_callback=None):
+        """Initialize the feature engineer
+
+        Args:
+            progress_callback: Optional callback function(stage_name: str, progress: int) for progress updates
+        """
         self.scaler = StandardScaler()
+        self.progress_callback = progress_callback
+
+    def _report_progress(self, stage: str, progress: int = None):
+        """Report progress if callback is set"""
+        if self.progress_callback:
+            self.progress_callback(stage, progress)
 
     def calculate_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -42,10 +52,14 @@ class FeatureEngineer:
 
         df = df.copy()
 
+        self._report_progress('Technical: Moving Averages', 52)
+
         # Moving Averages
         for window in [5, 10, 20, 50, 100, 200]:
             df[f'sma_{window}'] = df['close'].rolling(window=window).mean()
             df[f'ema_{window}'] = df['close'].ewm(span=window, adjust=False).mean()
+
+        self._report_progress('Technical: Bollinger Bands', 54)
 
         # Bollinger Bands
         for window in [20, 50]:
@@ -56,6 +70,8 @@ class FeatureEngineer:
             df[f'bb_middle_{window}'] = rolling_mean
             df[f'bb_width_{window}'] = (df[f'bb_upper_{window}'] - df[f'bb_lower_{window}']) / rolling_mean
 
+        self._report_progress('Technical: RSI', 56)
+
         # RSI (Relative Strength Index)
         for period in [14, 28]:
             delta = df['close'].diff()
@@ -64,12 +80,16 @@ class FeatureEngineer:
             rs = gain / loss
             df[f'rsi_{period}'] = 100 - (100 / (1 + rs))
 
+        self._report_progress('Technical: MACD', 58)
+
         # MACD
         exp1 = df['close'].ewm(span=12, adjust=False).mean()
         exp2 = df['close'].ewm(span=26, adjust=False).mean()
         df['macd'] = exp1 - exp2
         df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
         df['macd_histogram'] = df['macd'] - df['macd_signal']
+
+        self._report_progress('Technical: ATR & Stochastic', 60)
 
         # ATR (Average True Range)
         high_low = df['high'] - df['low']
@@ -85,6 +105,8 @@ class FeatureEngineer:
             high_max = df['high'].rolling(window=period).max()
             df[f'stoch_{period}'] = 100 * (df['close'] - low_min) / (high_max - low_min)
             df[f'stoch_{period}_sma'] = df[f'stoch_{period}'].rolling(window=3).mean()
+
+        self._report_progress('Technical: Volume & Momentum', 62)
 
         # Volume indicators
         df['volume_sma_20'] = df['volume'].rolling(window=20).mean()
@@ -115,7 +137,10 @@ class FeatureEngineer:
 
         features = {}
 
+        self._report_progress('Statistical: Basic stats', 64)
+
         # Price statistics
+        self._report_progress('Statistical: Computing price statistics', 64)
         features['price_mean'] = df['close'].mean()
         features['price_median'] = df['close'].median()
         features['price_std'] = df['close'].std()
@@ -127,6 +152,7 @@ class FeatureEngineer:
         features['price_kurtosis'] = kurtosis(df['close'].dropna())
 
         # Returns statistics
+        self._report_progress('Statistical: Computing returns', 65)
         returns = df['close'].pct_change().dropna()
         features['returns_mean'] = returns.mean()
         features['returns_std'] = returns.std()
@@ -135,16 +161,19 @@ class FeatureEngineer:
         features['sharpe_ratio'] = (returns.mean() / returns.std()) * np.sqrt(252 * 390) if returns.std() != 0 else 0
 
         # Volume statistics
+        self._report_progress('Statistical: Computing volume', 66)
         features['volume_mean'] = df['volume'].mean()
         features['volume_median'] = df['volume'].median()
         features['volume_std'] = df['volume'].std()
         features['volume_skewness'] = skew(df['volume'].dropna())
 
         # Volatility measures
+        self._report_progress('Statistical: Computing volatility', 67)
         features['volatility_intraday'] = ((df['high'] - df['low']) / df['close']).mean()
         features['volatility_close_to_close'] = df['close'].pct_change().std()
 
         # Trend statistics
+        self._report_progress('Statistical: Computing trend', 68)
         if len(df) > 1:
             x = np.arange(len(df))
             slope, intercept, r_value, p_value, std_err = stats.linregress(x, df['close'].values)
@@ -153,6 +182,7 @@ class FeatureEngineer:
             features['trend_p_value'] = p_value
 
         # Price levels
+        self._report_progress('Statistical: Price levels', 69)
         features['current_price'] = df['close'].iloc[-1] if len(df) > 0 else 0
         features['opening_price'] = df['open'].iloc[0] if len(df) > 0 else 0
         features['closing_price'] = df['close'].iloc[-1] if len(df) > 0 else 0
@@ -406,18 +436,18 @@ class FeatureEngineer:
             # Parkinson volatility next h (use future high/low window)
             hl = (np.log(high/low)**2).shift(-1).rolling(h).sum()
             out[f'next_{h}m_parkinson_vol'] = np.sqrt(hl/(4*h*np.log(2)))
-            # Max drawdown next h: compute using future window prices
-            future_prices = close.shift(-1)
-            md_series = []
-            for i in range(len(close)):
-                window = future_prices.iloc[i+1:i+1+h]
-                if len(window) < h:
-                    md_series.append(np.nan)
-                    continue
-                cum = (1+window.pct_change().fillna(0)).cumprod()
-                run_max = cum.cummax()
-                dd = (cum-run_max)/run_max
-                md_series.append(dd.min())
+            # Max drawdown next h: compute using future window prices (vectorized)
+            future_prices = close.shift(-1).fillna(method='ffill').values
+
+            # Vectorized max drawdown calculation
+            md_series = np.full(len(close), np.nan)
+            for i in range(len(close) - h):
+                window = future_prices[i:i+h]
+                if len(window) == h:
+                    cum = np.cumprod(1 + np.diff(window, prepend=window[0])/np.maximum(window[0], 1e-10))
+                    run_max = np.maximum.accumulate(cum)
+                    dd = (cum - run_max) / np.maximum(run_max, 1e-10)
+                    md_series[i] = np.min(dd)
             out[f'next_{h}m_max_drawdown'] = md_series
             # VaR 95 proxy using past returns (no leakage)
             past_ret_window = returns.iloc[:].rolling(h).apply(lambda x: np.nanquantile(x,0.05), raw=False)
@@ -592,27 +622,6 @@ class FeatureEngineer:
         regimes.update(regime_codes)
         return regimes
 
-    def calculate_predictive_labels(self, df: pd.DataFrame, horizons: List[int] = None) -> Dict:
-        if horizons is None:
-            horizons = [1,5,10,20,60]
-        if df.empty:
-            return {}
-        labels = {}
-        returns = df['close'].pct_change()
-        for h in horizons:
-            if len(returns) > h:
-                fr = (df['close'].shift(-h) - df['close']) / df['close']
-                # Use valid index (not shifted past data), fill NaN with 0
-                idx = min(h, len(fr) - 1)
-                val = fr.iloc[idx]
-                labels[f'forward_return_{h}'] = float(val) if not pd.isna(val) else 0.0
-        # Classification labels (next interval up/down > threshold)
-        threshold = 0.001
-        if len(returns) > 2:
-            next_ret = returns.shift(-1)
-            labels['next_move_up'] = int(next_ret.iloc[-2] > threshold) if len(next_ret.dropna())>2 else int(next_ret.iloc[0] > threshold)
-            labels['next_move_down'] = int(next_ret.iloc[-2] < -threshold) if len(next_ret.dropna())>2 else int(next_ret.iloc[0] < -threshold)
-        return labels
 
     def process_full_pipeline(self, df: pd.DataFrame) -> Dict:
         """

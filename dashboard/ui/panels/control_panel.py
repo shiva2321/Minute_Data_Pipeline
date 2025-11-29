@@ -185,20 +185,20 @@ class ControlPanel(QWidget):
 
         self.start_btn = QPushButton("▶ Start Pipeline")
         self.start_btn.setObjectName("startButton")
-        self.start_btn.setMinimumHeight(40)
+        self.start_btn.setMinimumHeight(35)  # Reduced from 40
         self.start_btn.clicked.connect(self._start_pipeline)
         actions_layout.addWidget(self.start_btn)
 
         self.pause_btn = QPushButton("⏸ Pause")
         self.pause_btn.setObjectName("pauseButton")
-        self.pause_btn.setMinimumHeight(40)
+        self.pause_btn.setMinimumHeight(35)  # Reduced from 40
         self.pause_btn.setEnabled(False)
         self.pause_btn.clicked.connect(self._pause_pipeline)
         actions_layout.addWidget(self.pause_btn)
 
         self.stop_btn = QPushButton("⏹ Stop")
         self.stop_btn.setObjectName("stopButton")
-        self.stop_btn.setMinimumHeight(40)
+        self.stop_btn.setMinimumHeight(35)  # Reduced from 40
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self._stop_pipeline)
         actions_layout.addWidget(self.stop_btn)
@@ -406,14 +406,14 @@ class ControlPanel(QWidget):
 
         # Select top N from the list
         selected = top_companies_by_market_cap[:min(n, len(top_companies_by_market_cap))]
-
+        
         # Set in symbol input field
         self.symbol_input.setText(', '.join(selected))
-
+        
         # Show confirmation message
         QMessageBox.information(
-            self,
-            "Top N Companies Selected",
+            self, 
+            "Top N Companies Selected", 
             f"Selected top {len(selected)} US companies by market cap:\n\n{', '.join(selected[:10])}"
             + (f"\n... and {len(selected) - 10} more" if len(selected) > 10 else "")
         )

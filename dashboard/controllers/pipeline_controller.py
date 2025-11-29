@@ -1,7 +1,8 @@
 """
-Pipeline Controller - True Parallel Processing
+Pipeline Controller - True Parallel Processing with GPU Acceleration
 Each worker processes symbols independently with its own rate limiter
 Optimized for Ryzen 5 7600 (6 cores, 12 threads)
+GPU-accelerated feature engineering for 1M+ datapoints
 """
 import sys
 from pathlib import Path
@@ -18,6 +19,13 @@ from pipeline import MinuteDataPipeline
 from utils.rate_limiter import AdaptiveRateLimiter
 from dashboard.utils.qt_signals import PipelineSignals
 from dashboard.services import MetricsCalculator
+
+# GPU Support
+try:
+    from dashboard.services.gpu_feature_engineer import get_gpu_feature_engineer, check_gpu_availability
+    GPU_AVAILABLE = True
+except ImportError:
+    GPU_AVAILABLE = False
 
 
 class PipelineController(QThread):
@@ -59,9 +67,9 @@ class PipelineController(QThread):
         self.per_worker_minute_limit = max(1, int(total_minute_limit / max_workers * 0.9))
         self.per_worker_daily_limit = max(10, int(total_daily_limit / max_workers * 0.9))
 
-        # Metrics update timer (10 seconds)
+        # Metrics update timer (2 seconds for real-time feel)
         self.last_update_time = time.time()
-        self.update_interval = 10  # Update every 10 seconds
+        self.update_interval = 2  # Update every 2 seconds for real-time updates
 
         # Initialize metrics calculator
         self.metrics_calc = MetricsCalculator()
@@ -259,7 +267,7 @@ class PipelineController(QThread):
                 self.symbol_control[symbol]['status'] = 'running'
 
             # Progress callback with micro-stage updates
-            def progress_callback(status: str, progress: int, micro_stage: str = '-', data_points: int = 0):
+            def progress_callback(status: str, progress: int, micro_stage: str = '-', data_points: int = 0, date_range: str = '-'):
                 # Gather API stats
                 stats = worker_rate_limiter.get_stats()
                 api_used = stats.get('daily_calls', 0)
@@ -274,8 +282,8 @@ class PipelineController(QThread):
                 else:
                     self.signals.log_message.emit('INFO', f'{symbol}: {status} ({progress}%)')
 
-                # Emit positional args with pause state
-                self.signals.symbol_progress.emit(symbol, status, int(progress), micro_stage or '-', int(data_points), int(api_used), float(duration_seconds), is_paused)
+                # Emit positional args with pause state and date range
+                self.signals.symbol_progress.emit(symbol, status, int(progress), micro_stage or '-', int(data_points), int(api_used), float(duration_seconds), is_paused, date_range or '-')
 
             # Log start
             self.signals.log_message.emit('INFO', f'Processing {symbol}...')
@@ -335,6 +343,7 @@ class PipelineController(QThread):
         import time
 
         start_time = time.time()
+        date_range_str = '-'  # Track date range for all callbacks
 
         # Calculate date range
         end_date = datetime.now()
@@ -424,6 +433,12 @@ class PipelineController(QThread):
 
         start_date = end_date - timedelta(days=365 * max_years)
 
+        # Display date range BEFORE fetching starts
+        date_range_str = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+        expected_days = (end_date - start_date).days
+        progress_callback('Initializing', 10, micro_stage=f'Range: {date_range_str} ({max_years}yr)', date_range=date_range_str)
+        self.signals.log_message.emit('INFO', f'{symbol}: Date range: {date_range_str} (~{expected_days} days)')
+
         # Estimate number of batches (30-day chunks)
         total_days = (end_date - start_date).days
         batch_days = 30
@@ -438,7 +453,7 @@ class PipelineController(QThread):
             # Calculate progress
             progress = int((batch_num / max(1,total_batches)) * 45)
             micro_stage = f'Fetch batch {batch_num+1}/{total_batches}'
-            progress_callback('Fetching', progress, micro_stage=micro_stage)
+            progress_callback('Fetching', progress, micro_stage=micro_stage, date_range=date_range_str)
 
             # Fetch this batch
             df_batch = pipeline.data_fetcher.fetch_intraday_data(
@@ -457,17 +472,48 @@ class PipelineController(QThread):
         import pandas as pd
         df = pd.concat(all_data, ignore_index=True).drop_duplicates().reset_index(drop=True)
 
+        # Report actual data points received
+        actual_start = str(df['datetime'].min())[:10] if 'datetime' in df.columns and len(df) > 0 else '?'
+        actual_end = str(df['datetime'].max())[:10] if 'datetime' in df.columns and len(df) > 0 else '?'
+        progress_callback('Fetching', 48, micro_stage=f'Retrieved {len(df):,} data points', data_points=len(df))
+        self.signals.log_message.emit('INFO', f'{symbol}: Fetched {len(df):,} data points ({actual_start} to {actual_end})')
         # Engineering features with micro-stage updates
         total_features = 200  # Approximate
         progress_callback('Engineering', 50, micro_stage='Starting feature pipeline', data_points=len(df))
 
-        # Calculate all features with periodic updates
+        # Create feature-specific progress callback that includes date_range
+        def feature_progress(stage_name, progress_pct):
+            if progress_pct:
+                progress_callback('Engineering', progress_pct, micro_stage=stage_name, data_points=len(df), date_range=date_range_str)
+
+        # Inject progress callback into feature engineer
+        pipeline.feature_engineer.progress_callback = feature_progress
+
+        # Calculate all features with periodic updates (GPU or CPU)
         features = pipeline.feature_engineer.process_full_pipeline(df)
 
-        progress_callback('Engineering', 65, micro_stage='Finalizing features', data_points=len(df))
-        progress_callback('Creating', 70, micro_stage='Building profile object')
+        progress_callback('Engineering', 68, micro_stage='Features complete', data_points=len(df), date_range=date_range_str)
+        progress_callback('Creating', 70, micro_stage='Building profile object', date_range=date_range_str)
 
-        # Create company profile
+        # Train ML models
+        progress_callback('ML Training', 71, micro_stage='Initializing ML trainer', date_range=date_range_str)
+        from dashboard.services.ml_model_trainer import MLModelTrainer
+
+        def ml_progress(stage, progress):
+            progress_callback('ML Training', progress, micro_stage=stage, date_range=date_range_str)
+
+        ml_trainer = MLModelTrainer(progress_callback=ml_progress)
+        models_result = ml_trainer.train_models(features, df, symbol)
+
+        progress_callback('ML Training', 75, micro_stage='Models trained successfully', date_range=date_range_str)
+
+        # Create ML profile
+        ml_profile = ml_trainer.create_ml_profile(symbol, models_result, features)
+
+        # Create statistical profile
+        stat_profile = ml_trainer.create_statistical_profile(symbol, features)
+
+        # Create company profile (original profile)
         profile = pipeline.storage.create_company_profile(
             symbol=symbol,
             exchange='US',
@@ -476,12 +522,16 @@ class PipelineController(QThread):
             fundamental_data={}
         )
 
-        progress_callback('Storing', 90, micro_stage='Writing to MongoDB')
+        progress_callback('Storing', 85, micro_stage='Saving profiles', date_range=date_range_str)
 
-        # Save to database
-        pipeline.storage.save_profile(profile)
+        # Save all three profile types to database
+        pipeline.storage.save_profile(profile)  # Original profile
+        pipeline.storage.save_ml_profile(ml_profile)  # ML profile
+        pipeline.storage.save_statistical_profile(stat_profile)  # Statistical profile
 
-        progress_callback('Complete', 100, micro_stage='Done')
+        self.signals.log_message.emit('SUCCESS', f'{symbol}: Saved 3 profile types (original, ML, statistical)')
+
+        progress_callback('Complete', 100, micro_stage='Done', date_range=date_range_str)
 
         return profile
 
@@ -495,8 +545,13 @@ class PipelineController(QThread):
         """Incremental update of existing profile"""
         progress_callback('Fetching', 10, micro_stage='Incremental new data')
 
-        # Get last update date
+        # Get last update date - handle both "YYYY-MM-DD HH:MM:SS" and "YYYY-MM-DD" formats
         last_date = existing_profile.get('data_date_range', {}).get('end')
+
+        if last_date:
+            # Extract just the date part if timestamp is included
+            if ' ' in str(last_date):
+                last_date = str(last_date).split(' ')[0]  # Get "YYYY-MM-DD" from "YYYY-MM-DD HH:MM:SS"
 
         # Fetch new data
         df = pipeline.data_fetcher.fetch_intraday_data(
@@ -515,6 +570,19 @@ class PipelineController(QThread):
 
         progress_callback('Creating', 70, micro_stage='Merging profile')
 
+        # Train ML models
+        from dashboard.services.ml_model_trainer import MLModelTrainer
+
+        def ml_progress(stage, progress):
+            progress_callback('ML Training', progress, micro_stage=stage)
+
+        ml_trainer = MLModelTrainer(progress_callback=ml_progress)
+        models_result = ml_trainer.train_models(features, df, symbol)
+
+        # Create profiles
+        ml_profile = ml_trainer.create_ml_profile(symbol, models_result, features)
+        stat_profile = ml_trainer.create_statistical_profile(symbol, features)
+
         # Create updated profile
         profile = pipeline.storage.create_company_profile(
             symbol=symbol,
@@ -524,10 +592,12 @@ class PipelineController(QThread):
             fundamental_data={}
         )
 
-        progress_callback('Storing', 90, micro_stage='Updating MongoDB')
+        progress_callback('Storing', 85, micro_stage='Updating MongoDB')
 
-        # Update in database
+        # Update all profiles in database
         pipeline.storage.update_profile(symbol, profile)
+        pipeline.storage.save_ml_profile(ml_profile)
+        pipeline.storage.save_statistical_profile(stat_profile)
 
         progress_callback('Complete', 100, micro_stage='Done')
 
