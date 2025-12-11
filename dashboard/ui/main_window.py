@@ -14,6 +14,7 @@ from dashboard.ui.panels.control_panel import ControlPanel
 from dashboard.ui.panels.monitor_panel import MonitorPanel
 from dashboard.ui.panels.profile_browser import ProfileBrowser
 from dashboard.ui.panels.settings_panel import SettingsPanel
+from dashboard.ui.panels.visualization_panel import VisualizationPanel
 from dashboard.ui.widgets.cache_manager_widget import CacheManagerWidget
 from dashboard.controllers.pipeline_controller import PipelineController
 from dashboard.services.email_alert import EmailAlerter
@@ -79,12 +80,17 @@ class MainWindow(QMainWindow):
         # Tab 2: Profile Browser
         self.profile_browser = ProfileBrowser()
         self.tabs.addTab(self.profile_browser, "🗂 Database Profiles")
+        
+        # Tab 3: Visualization (NEW)
+        self.visualization_panel = VisualizationPanel()
+        self.visualization_panel._refresh_symbols()  # Load symbols on startup
+        self.tabs.addTab(self.visualization_panel, "📈 Data Visualization")
 
-        # Tab 3: Settings
+        # Tab 4: Settings
         self.settings_panel = SettingsPanel()
         self.tabs.addTab(self.settings_panel, "⚙ Settings")
 
-        # Tab 4: Cache Manager
+        # Tab 5: Cache Manager
         self.cache_manager = CacheManagerWidget()
         self.tabs.addTab(self.cache_manager, "📦 Cache Manager")
 

@@ -278,6 +278,95 @@ class FeatureEngineer:
 
         return df
 
+    def calculate_granular_minute_features(self, df: pd.DataFrame) -> Dict:
+        """
+        Calculate granular minute-level analysis features
+        
+        Args:
+            df: DataFrame with OHLCV minute data
+            
+        Returns:
+            Dictionary of granular minute-level features
+        """
+        if df.empty or 'datetime' not in df.columns:
+            return {}
+        
+        features = {}
+        
+        # Intraday volatility patterns
+        df_temp = df.copy()
+        df_temp['datetime'] = pd.to_datetime(df_temp['datetime'])
+        df_temp['hour'] = df_temp['datetime'].dt.hour
+        df_temp['minute'] = df_temp['datetime'].dt.minute
+        df_temp['returns'] = df_temp['close'].pct_change()
+        
+        # Volume-weighted volatility by hour
+        hourly_vwap_vol = {}
+        for hour in df_temp['hour'].unique():
+            hour_data = df_temp[df_temp['hour'] == hour]
+            if len(hour_data) > 1 and hour_data['volume'].sum() > 0:
+                weighted_vol = np.sqrt(np.average(
+                    hour_data['returns'].dropna()**2, 
+                    weights=hour_data.loc[hour_data['returns'].notna(), 'volume']
+                ))
+                hourly_vwap_vol[int(hour)] = float(weighted_vol)
+        
+        features['hourly_vwap_volatility'] = hourly_vwap_vol
+        
+        # Minute-level liquidity metrics
+        df_temp['volume_per_point'] = df_temp['volume'] / (df_temp['high'] - df_temp['low']).replace(0, np.nan)
+        features['avg_liquidity_depth'] = float(df_temp['volume_per_point'].mean())
+        features['liquidity_variability'] = float(df_temp['volume_per_point'].std())
+        
+        # Volume concentration (Gini coefficient for volume distribution)
+        sorted_volume = np.sort(df_temp['volume'].values)
+        n = len(sorted_volume)
+        if n > 0:
+            cumsum = np.cumsum(sorted_volume)
+            gini = (2 * np.sum((np.arange(n) + 1) * sorted_volume)) / (n * cumsum[-1]) - (n + 1) / n
+            features['volume_gini_coefficient'] = float(gini)
+        
+        # High-frequency price action patterns
+        # Momentum bursts (rapid price movements)
+        df_temp['price_acceleration'] = df_temp['returns'].diff()
+        features['max_momentum_burst'] = float(df_temp['price_acceleration'].abs().max())
+        features['avg_momentum_burst'] = float(df_temp['price_acceleration'].abs().mean())
+        
+        # Price reversals (count of sign changes in returns)
+        sign_changes = (np.sign(df_temp['returns'].dropna()).diff() != 0).sum()
+        features['price_reversal_count'] = int(sign_changes)
+        features['price_reversal_frequency'] = float(sign_changes / len(df_temp) if len(df_temp) > 0 else 0)
+        
+        # Tick-level statistical anomalies
+        # Z-score outliers in price movements
+        returns_zscore = (df_temp['returns'] - df_temp['returns'].mean()) / df_temp['returns'].std()
+        features['extreme_move_count_3sigma'] = int((returns_zscore.abs() > 3).sum())
+        features['extreme_move_count_2sigma'] = int((returns_zscore.abs() > 2).sum())
+        
+        # Intraday volatility clustering (ARCH effects)
+        if len(df_temp) >= 10:
+            squared_returns = df_temp['returns'].dropna() ** 2
+            # Autocorrelation of squared returns at lag 1 (proxy for ARCH)
+            if len(squared_returns) > 1:
+                arch_effect = squared_returns.autocorr(lag=1)
+                features['volatility_clustering_coef'] = float(arch_effect) if not np.isnan(arch_effect) else 0.0
+        
+        # Trade intensity analysis
+        # Average time between trades (approximated by minute intervals with volume)
+        active_minutes = df_temp[df_temp['volume'] > 0]
+        if len(active_minutes) > 1:
+            features['active_trading_minutes'] = len(active_minutes)
+            features['trading_intensity'] = float(len(active_minutes) / len(df_temp))
+        
+        # Price discovery metrics
+        # Efficiency ratio: net price change / total price distance
+        if len(df_temp) > 0:
+            net_change = abs(df_temp['close'].iloc[-1] - df_temp['close'].iloc[0])
+            total_distance = df_temp['returns'].abs().sum()
+            features['price_efficiency_ratio'] = float(net_change / total_distance if total_distance > 0 else 0)
+        
+        return features
+
     def calculate_market_microstructure(self, df: pd.DataFrame) -> Dict:
         """
         Calculate market microstructure features
@@ -399,7 +488,10 @@ class FeatureEngineer:
         frames = {}
         tmp = df.copy()
         tmp.set_index('datetime', inplace=True)
-        spec = {'5m': '5T', '15m': '15T', '1h': '1H', '1d': '1D'}
+        # Enhanced timeframes: added 2m, 3m, 30m
+        spec = {'2m': '2T', '3m': '3T', '5m': '5T', '15m': '15T', '30m': '30T', '1h': '1H', '1d': '1D'}
+        
+        all_returns = {}
         for label, rule in spec.items():
             try:
                 agg = tmp.resample(rule).agg({'open':'first','high':'max','low':'min','close':'last','volume':'sum'})
@@ -408,12 +500,63 @@ class FeatureEngineer:
                     continue
                 frames[label] = agg.reset_index()
                 r = agg['close'].pct_change().dropna()
+                all_returns[label] = r
+                
                 metrics[f'{label}_volatility'] = r.std()
                 metrics[f'{label}_avg_volume'] = agg['volume'].mean()
                 metrics[f'{label}_return'] = (agg['close'].iloc[-1]-agg['close'].iloc[0])/agg['close'].iloc[0]
                 metrics[f'{label}_trend_slope'] = stats.linregress(np.arange(len(agg)), agg['close']).slope if len(agg)>1 else None
+                
+                # Timeframe-specific regime detection
+                if len(r) >= 20:
+                    vol_mean = r.std()
+                    vol_rolling = r.rolling(10).std()
+                    if not vol_rolling.empty:
+                        current_vol = vol_rolling.iloc[-1]
+                        if current_vol < vol_mean * 0.7:
+                            metrics[f'{label}_regime'] = 'low_volatility'
+                        elif current_vol > vol_mean * 1.3:
+                            metrics[f'{label}_regime'] = 'high_volatility'
+                        else:
+                            metrics[f'{label}_regime'] = 'normal'
+                
+                # Add momentum indicators per timeframe
+                if len(agg) >= 5:
+                    rsi_period = min(14, len(agg) // 2)
+                    if rsi_period >= 2:
+                        delta = agg['close'].diff()
+                        gain = (delta.where(delta > 0, 0)).rolling(window=rsi_period).mean()
+                        loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_period).mean()
+                        rs = gain / loss.replace(0, np.nan)
+                        rsi = 100 - (100 / (1 + rs))
+                        if not rsi.empty and not np.isnan(rsi.iloc[-1]):
+                            metrics[f'{label}_rsi'] = float(rsi.iloc[-1])
+                
             except Exception:
                 continue
+        
+        # Cross-timeframe correlation analysis
+        if len(all_returns) >= 2:
+            correlation_matrix = {}
+            timeframes = list(all_returns.keys())
+            for i, tf1 in enumerate(timeframes):
+                for tf2 in timeframes[i+1:]:
+                    # Align the two return series
+                    try:
+                        r1 = all_returns[tf1]
+                        r2 = all_returns[tf2]
+                        # Use overlapping indices
+                        common_len = min(len(r1), len(r2))
+                        if common_len >= 5:
+                            corr = np.corrcoef(r1.iloc[-common_len:], r2.iloc[-common_len:])[0, 1]
+                            if not np.isnan(corr):
+                                correlation_matrix[f'{tf1}_vs_{tf2}'] = float(corr)
+                    except Exception:
+                        continue
+            
+            if correlation_matrix:
+                metrics['timeframe_correlations'] = correlation_matrix
+        
         return metrics, frames
 
     def generate_predictive_label_series(self, df: pd.DataFrame, horizons=None) -> pd.DataFrame:
@@ -665,6 +808,10 @@ class FeatureEngineer:
 
         # Calculate microstructure features
         microstructure_features = self.calculate_market_microstructure(df)
+        
+        # Calculate granular minute-level features
+        self._report_progress('Granular Analysis', 70)
+        granular_features = self.calculate_granular_minute_features(df)
 
         # Advanced technical indicators
         df_adv = self.calculate_advanced_technical(df_with_ml)
@@ -709,6 +856,7 @@ class FeatureEngineer:
             'statistical_features': statistical_features,
             'time_features': time_features,
             'microstructure_features': microstructure_features,
+            'granular_minute_features': granular_features,  # NEW: Granular minute analysis
             'summary': {
                 'total_records': len(df),
                 'date_range': {
