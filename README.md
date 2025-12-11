@@ -49,6 +49,9 @@ run_dashboard.bat
 - **Parallel Processing**: 10 independent worker threads with adaptive rate limiting
 - **Smart Caching**: 2GB cache with 30-day TTL and date-range lookups
 - **200+ Features**: Technical indicators, statistical analysis, microstructure features
+- **Enhanced Granular Analysis**: Advanced minute-level metrics including volatility patterns, liquidity depth, and price action analysis
+- **Multi-Timeframe Analysis**: Enhanced timeframes (2m, 3m, 5m, 15m, 30m, 1h, 1d) with cross-correlation and regime detection
+- **Interactive Visualization**: New visualization tab with interactive charts, data exploration, and export capabilities
 - **Real-time Dashboard**: Live monitoring with micro-stage progress tracking
 - **Thread-Safe**: Complete concurrent operation support
 - **Performance**: 5-8× speedup with vectorized operations
@@ -101,6 +104,7 @@ run_dashboard.bat
 ### Dashboard
 - **Real-time Monitoring**: Live processing queue with micro-stage progress
 - **Profile Browsing**: View and analyze stored company profiles
+- **Interactive Visualization**: New visualization tab with interactive charts, granular analysis display, and data exploration tools
 - **Cache Management**: Browse, search, and manage cached data
 - **API Monitoring**: Real-time API call tracking and rate limit display
 - **Settings Panel**: Configure system behavior, API keys, database connections
