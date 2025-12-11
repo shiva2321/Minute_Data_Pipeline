@@ -17,14 +17,23 @@ def test_granular_features():
     print("Testing Granular Minute Analysis Features")
     print("=" * 60)
     
-    # Create sample minute data
+    # Create sample minute data with valid OHLC relationships
     dates = pd.date_range(start='2024-01-01 09:30', periods=200, freq='1min')
+    
+    # Generate base prices
+    open_prices = np.random.uniform(100, 110, 200)
+    close_prices = np.random.uniform(100, 110, 200)
+    
+    # Ensure high >= max(open, close) and low <= min(open, close)
+    high_prices = np.maximum(open_prices, close_prices) + np.random.uniform(0, 10, 200)
+    low_prices = np.minimum(open_prices, close_prices) - np.random.uniform(0, 10, 200)
+    
     df = pd.DataFrame({
         'datetime': dates,
-        'open': np.random.uniform(100, 110, 200),
-        'high': np.random.uniform(110, 120, 200),
-        'low': np.random.uniform(90, 100, 200),
-        'close': np.random.uniform(100, 110, 200),
+        'open': open_prices,
+        'high': high_prices,
+        'low': low_prices,
+        'close': close_prices,
         'volume': np.random.randint(1000, 10000, 200)
     })
     
@@ -62,14 +71,19 @@ def test_multi_timeframe_enhancements():
     print("Testing Enhanced Multi-Timeframe Analysis")
     print("=" * 60)
     
-    # Create sample data
+    # Create sample data with valid OHLC relationships
     dates = pd.date_range(start='2024-01-01 09:30', periods=500, freq='1min')
+    open_prices = np.random.uniform(100, 110, 500)
+    close_prices = np.random.uniform(100, 110, 500)
+    high_prices = np.maximum(open_prices, close_prices) + np.random.uniform(0, 10, 500)
+    low_prices = np.minimum(open_prices, close_prices) - np.random.uniform(0, 10, 500)
+    
     df = pd.DataFrame({
         'datetime': dates,
-        'open': np.random.uniform(100, 110, 500),
-        'high': np.random.uniform(110, 120, 500),
-        'low': np.random.uniform(90, 100, 500),
-        'close': np.random.uniform(100, 110, 500),
+        'open': open_prices,
+        'high': high_prices,
+        'low': low_prices,
+        'close': close_prices,
         'volume': np.random.randint(1000, 10000, 500)
     })
     
@@ -107,14 +121,19 @@ def test_full_pipeline_integration():
     print("Testing Full Pipeline Integration")
     print("=" * 60)
     
-    # Create sample data
+    # Create sample data with valid OHLC relationships
     dates = pd.date_range(start='2024-01-01 09:30', periods=300, freq='1min')
+    open_prices = np.random.uniform(100, 110, 300)
+    close_prices = np.random.uniform(100, 110, 300)
+    high_prices = np.maximum(open_prices, close_prices) + np.random.uniform(0, 10, 300)
+    low_prices = np.minimum(open_prices, close_prices) - np.random.uniform(0, 10, 300)
+    
     df = pd.DataFrame({
         'datetime': dates,
-        'open': np.random.uniform(100, 110, 300),
-        'high': np.random.uniform(110, 120, 300),
-        'low': np.random.uniform(90, 100, 300),
-        'close': np.random.uniform(100, 110, 300),
+        'open': open_prices,
+        'high': high_prices,
+        'low': low_prices,
+        'close': close_prices,
         'volume': np.random.randint(1000, 10000, 300)
     })
     

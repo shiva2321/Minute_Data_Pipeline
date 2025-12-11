@@ -359,42 +359,40 @@ class VisualizationPanel(QWidget):
             
             if 'close' not in df.columns:
                 return
-                
-            price_series = QLineSeries()
-            price_series.setName("Close Price")
             
-            for idx, row in df.iterrows():
-                if 'datetime' in row and pd.notna(row['close']):
-                    try:
-                        if isinstance(row['datetime'], str):
-                            dt = pd.to_datetime(row['datetime'])
-                        else:
-                            dt = row['datetime']
-                        timestamp = dt.timestamp() * 1000  # Convert to milliseconds
-                        price_series.append(timestamp, float(row['close']))
-                    except Exception:
-                        continue
-                        
+            # Helper function to add series efficiently
+            def add_series_to_chart(df, column, series_name, color=None):
+                """Add a series to chart using vectorized operations"""
+                series = QLineSeries()
+                series.setName(series_name)
+                if color:
+                    series.setColor(color)
+                
+                # Convert datetime column once
+                if 'datetime' in df.columns:
+                    df_temp = df.copy()
+                    df_temp['datetime'] = pd.to_datetime(df_temp['datetime'])
+                    df_temp['timestamp'] = df_temp['datetime'].apply(lambda x: x.timestamp() * 1000)
+                    
+                    # Filter valid data
+                    valid_data = df_temp[df_temp[column].notna()][['timestamp', column]]
+                    
+                    # Bulk append points
+                    for _, row in valid_data.iterrows():
+                        try:
+                            series.append(float(row['timestamp']), float(row[column]))
+                        except Exception:
+                            continue
+                            
+                return series
+            
+            # Add price series
+            price_series = add_series_to_chart(df, 'close', "Close Price")
             self.price_chart.addSeries(price_series)
             
             # Add SMA if checked
             if self.show_sma_cb.isChecked() and 'sma_20' in df.columns:
-                sma_series = QLineSeries()
-                sma_series.setName("SMA 20")
-                sma_series.setColor(QColor(255, 165, 0))
-                
-                for idx, row in df.iterrows():
-                    if 'datetime' in row and pd.notna(row.get('sma_20')):
-                        try:
-                            if isinstance(row['datetime'], str):
-                                dt = pd.to_datetime(row['datetime'])
-                            else:
-                                dt = row['datetime']
-                            timestamp = dt.timestamp() * 1000
-                            sma_series.append(timestamp, float(row['sma_20']))
-                        except Exception:
-                            continue
-                            
+                sma_series = add_series_to_chart(df, 'sma_20', "SMA 20", QColor(255, 165, 0))
                 self.price_chart.addSeries(sma_series)
                 
             # Create axes

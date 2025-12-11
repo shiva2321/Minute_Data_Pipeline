@@ -315,22 +315,29 @@ class FeatureEngineer:
         
         # Minute-level liquidity metrics
         df_temp['volume_per_point'] = df_temp['volume'] / (df_temp['high'] - df_temp['low']).replace(0, np.nan)
-        features['avg_liquidity_depth'] = float(df_temp['volume_per_point'].mean())
-        features['liquidity_variability'] = float(df_temp['volume_per_point'].std())
+        avg_depth = df_temp['volume_per_point'].mean()
+        std_depth = df_temp['volume_per_point'].std()
+        features['avg_liquidity_depth'] = float(avg_depth) if not pd.isna(avg_depth) else 0.0
+        features['liquidity_variability'] = float(std_depth) if not pd.isna(std_depth) else 0.0
         
         # Volume concentration (Gini coefficient for volume distribution)
         sorted_volume = np.sort(df_temp['volume'].values)
         n = len(sorted_volume)
         if n > 0:
             cumsum = np.cumsum(sorted_volume)
-            gini = (2 * np.sum((np.arange(n) + 1) * sorted_volume)) / (n * cumsum[-1]) - (n + 1) / n
-            features['volume_gini_coefficient'] = float(gini)
+            if cumsum[-1] > 0:  # Avoid division by zero
+                gini = (2 * np.sum((np.arange(n) + 1) * sorted_volume)) / (n * cumsum[-1]) - (n + 1) / n
+                features['volume_gini_coefficient'] = float(gini)
+            else:
+                features['volume_gini_coefficient'] = 0.0
         
         # High-frequency price action patterns
         # Momentum bursts (rapid price movements)
         df_temp['price_acceleration'] = df_temp['returns'].diff()
-        features['max_momentum_burst'] = float(df_temp['price_acceleration'].abs().max())
-        features['avg_momentum_burst'] = float(df_temp['price_acceleration'].abs().mean())
+        max_burst = df_temp['price_acceleration'].abs().max()
+        avg_burst = df_temp['price_acceleration'].abs().mean()
+        features['max_momentum_burst'] = float(max_burst) if not pd.isna(max_burst) else 0.0
+        features['avg_momentum_burst'] = float(avg_burst) if not pd.isna(avg_burst) else 0.0
         
         # Price reversals (count of sign changes in returns)
         sign_changes = (np.sign(df_temp['returns'].dropna()).diff() != 0).sum()
@@ -339,9 +346,14 @@ class FeatureEngineer:
         
         # Tick-level statistical anomalies
         # Z-score outliers in price movements
-        returns_zscore = (df_temp['returns'] - df_temp['returns'].mean()) / df_temp['returns'].std()
-        features['extreme_move_count_3sigma'] = int((returns_zscore.abs() > 3).sum())
-        features['extreme_move_count_2sigma'] = int((returns_zscore.abs() > 2).sum())
+        returns_std = df_temp['returns'].std()
+        if returns_std > 0 and not pd.isna(returns_std):  # Avoid division by zero
+            returns_zscore = (df_temp['returns'] - df_temp['returns'].mean()) / returns_std
+            features['extreme_move_count_3sigma'] = int((returns_zscore.abs() > 3).sum())
+            features['extreme_move_count_2sigma'] = int((returns_zscore.abs() > 2).sum())
+        else:
+            features['extreme_move_count_3sigma'] = 0
+            features['extreme_move_count_2sigma'] = 0
         
         # Intraday volatility clustering (ARCH effects)
         if len(df_temp) >= 10:
